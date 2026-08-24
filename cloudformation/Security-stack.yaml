@@ -1,0 +1,154 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  CloudMart Security Stack.
+  Creates IAM execution role for the Lambda Authorizer.
+
+Parameters:
+
+  Environment:
+    Type: String
+    Default: dev
+
+    AllowedValues:
+      - dev
+      - test
+      - prod
+
+
+Resources:
+
+  # =========================================================
+  # Lambda Authorizer IAM Role
+  # =========================================================
+
+  AuthorizerLambdaRole:
+    Type: AWS::IAM::Role
+
+    Properties:
+
+      RoleName:
+        !Sub cloudmart-${Environment}-authorizer-role
+
+      Description:
+        !Sub >
+          IAM execution role for CloudMart ${Environment}
+          Lambda Authorizer.
+
+      # Lambda is allowed to assume this role
+      AssumeRolePolicyDocument:
+
+        Version: '2012-10-17'
+
+        Statement:
+
+          - Effect: Allow
+
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+
+            Action:
+              - sts:AssumeRole
+
+
+      Policies:
+
+        # ---------------------------------------------------
+        # SSM permission
+        # ---------------------------------------------------
+
+        - PolicyName:
+            !Sub cloudmart-${Environment}-authorizer-ssm
+
+          PolicyDocument:
+
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Sid: ReadAuthenticationToken
+
+                Effect: Allow
+
+                Action:
+                  - ssm:GetParameter
+
+                Resource:
+                  !Sub >
+                    arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudmart/${Environment}/auth/token
+
+
+        # ---------------------------------------------------
+        # CloudWatch Logs permission
+        # ---------------------------------------------------
+
+        - PolicyName:
+            !Sub cloudmart-${Environment}-authorizer-logs
+
+          PolicyDocument:
+
+            Version: '2012-10-17'
+
+            Statement:
+
+              - Sid: CreateLogStream
+
+                Effect: Allow
+
+                Action:
+                  - logs:CreateLogStream
+
+                Resource:
+                  !Sub >
+                    arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/cloudmart-${Environment}-authorizer:*
+
+
+              - Sid: WriteLogEvents
+
+                Effect: Allow
+
+                Action:
+                  - logs:PutLogEvents
+
+                Resource:
+                  !Sub >
+                    arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/cloudmart-${Environment}-authorizer:*
+
+
+Outputs:
+
+  # =========================================================
+  # Authorizer Role ARN
+  # =========================================================
+
+  AuthorizerLambdaRoleArn:
+
+    Description:
+      IAM role ARN used by the Lambda Authorizer.
+
+    Value:
+      !GetAtt AuthorizerLambdaRole.Arn
+
+    Export:
+
+      Name:
+        !Sub CloudMart-${Environment}-AuthorizerLambdaRoleArn
+
+
+  # =========================================================
+  # Authorizer Role Name
+  # =========================================================
+
+  AuthorizerLambdaRoleName:
+
+    Description:
+      IAM role name used by the Lambda Authorizer.
+
+    Value:
+      !Ref AuthorizerLambdaRole
+
+    Export:
+
+      Name:
+        !Sub CloudMart-${Environment}-AuthorizerLambdaRoleName
