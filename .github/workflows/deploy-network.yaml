@@ -1,0 +1,197 @@
+name: Deploy Network Stack
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  ENVIRONMENT: dev
+  STACK_NAME: cloudmart-dev-network
+
+jobs:
+
+  deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ----------------------------------------
+      # 1. Checkout repository
+      # ----------------------------------------
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # ----------------------------------------
+      # 2. Configure AWS credentials
+      # ----------------------------------------
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # ----------------------------------------
+      # 3. Verify AWS access
+      # ----------------------------------------
+
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+
+      # ----------------------------------------
+      # 4. Validate CloudFormation template
+      # ----------------------------------------
+
+      - name: Validate Network Stack
+        run: |
+          aws cloudformation validate-template \
+            --template-body file://cloudformation/Network-stack.yaml \
+            --region "$AWS_REGION"
+
+
+      # ----------------------------------------
+      # 5. Check whether stack exists
+      # ----------------------------------------
+
+      - name: Check stack
+        id: stack
+
+        run: |
+
+          if aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            > /dev/null 2>&1; then
+
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+
+          else
+
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+
+          fi
+
+
+      # ----------------------------------------
+      # 6. Create stack if it doesn't exist
+      # ----------------------------------------
+
+      - name: Create Network Stack
+        if: steps.stack.outputs.exists == 'false'
+
+        run: |
+
+          aws cloudformation create-stack \
+            --stack-name "$STACK_NAME" \
+            --template-body file://cloudformation/Network-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+            --region "$AWS_REGION"
+
+
+      # ----------------------------------------
+      # 7. Wait for CREATE
+      # ----------------------------------------
+
+      - name: Wait for stack creation
+        if: steps.stack.outputs.exists == 'false'
+
+        run: |
+
+          aws cloudformation wait stack-create-complete \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+
+      # ----------------------------------------
+      # 8. Create Change Set for existing stack
+      # ----------------------------------------
+
+      - name: Create Network Change Set
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="network-${GITHUB_SHA}"
+
+          aws cloudformation create-change-set \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --change-set-type UPDATE \
+            --template-body file://cloudformation/Network-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+            --region "$AWS_REGION"
+
+
+      # ----------------------------------------
+      # 9. Wait for Change Set
+      # ----------------------------------------
+
+      - name: Wait for Change Set
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="network-${GITHUB_SHA}"
+
+          aws cloudformation wait change-set-create-complete \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$AWS_REGION"
+
+
+      # ----------------------------------------
+      # 10. Execute Change Set
+      # ----------------------------------------
+
+      - name: Execute Change Set
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="network-${GITHUB_SHA}"
+
+          aws cloudformation execute-change-set \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$AWS_REGION"
+
+
+      # ----------------------------------------
+      # 11. Wait for UPDATE
+      # ----------------------------------------
+
+      - name: Wait for stack update
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          aws cloudformation wait stack-update-complete \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+
+      # ----------------------------------------
+      # 12. Display outputs
+      # ----------------------------------------
+
+      - name: Display Network Stack outputs
+
+        run: |
+
+          aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs"
