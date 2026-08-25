@@ -180,7 +180,7 @@ Resources:
       # Backup
       # ---------------------------------------------------
 
-      BackupRetentionPeriod: 7
+      BackupRetentionPeriod: 0
 
 
       # ---------------------------------------------------
