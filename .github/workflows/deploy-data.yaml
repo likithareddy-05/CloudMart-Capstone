@@ -12,6 +12,7 @@ env:
   ENVIRONMENT: dev
   STACK_NAME: cloudmart-dev-data
 
+
 jobs:
 
   deploy:
@@ -21,7 +22,7 @@ jobs:
     steps:
 
       # =====================================================
-      # CHECKOUT
+      # 1. CHECKOUT REPOSITORY
       # =====================================================
 
       - name: Checkout repository
@@ -29,7 +30,7 @@ jobs:
 
 
       # =====================================================
-      # AWS CREDENTIALS
+      # 2. CONFIGURE AWS CREDENTIALS
       # =====================================================
 
       - name: Configure AWS credentials
@@ -41,7 +42,7 @@ jobs:
 
 
       # =====================================================
-      # VERIFY AWS IDENTITY
+      # 3. VERIFY AWS IDENTITY
       # =====================================================
 
       - name: Verify AWS identity
@@ -50,7 +51,7 @@ jobs:
 
 
       # =====================================================
-      # VALIDATE TEMPLATE
+      # 4. VALIDATE CLOUDFORMATION TEMPLATE
       # =====================================================
 
       - name: Validate Data Stack
@@ -61,7 +62,34 @@ jobs:
 
 
       # =====================================================
-      # CHECK STACK
+      # 5. VERIFY RDS CONFIGURATION
+      # =====================================================
+      #
+      # This confirms that the version being deployed contains:
+      #
+      # MultiAZ: false
+      # BackupRetentionPeriod: 0
+      #
+      # The values themselves are not secrets.
+      # =====================================================
+
+      - name: Verify RDS configuration
+        run: |
+
+          echo "Checking RDS Multi-AZ configuration..."
+
+          grep -n "MultiAZ:" \
+            cloudformation/Data-stack.yaml || true
+
+          echo ""
+          echo "Checking RDS backup retention configuration..."
+
+          grep -n "BackupRetentionPeriod:" \
+            cloudformation/Data-stack.yaml || true
+
+
+      # =====================================================
+      # 6. CHECK WHETHER STACK EXISTS
       # =====================================================
 
       - name: Check stack
@@ -76,15 +104,19 @@ jobs:
 
             echo "exists=true" >> "$GITHUB_OUTPUT"
 
+            echo "Data stack already exists."
+
           else
 
             echo "exists=false" >> "$GITHUB_OUTPUT"
+
+            echo "Data stack does not exist."
 
           fi
 
 
       # =====================================================
-      # CREATE STACK
+      # 7. CREATE DATA STACK
       # =====================================================
 
       - name: Create Data Stack
@@ -94,6 +126,8 @@ jobs:
           DB_PASSWORD: ${{ secrets.CLOUDMART_DB_PASSWORD }}
 
         run: |
+
+          echo "Creating CloudMart Data Stack..."
 
           aws cloudformation create-stack \
             --stack-name "$STACK_NAME" \
@@ -105,9 +139,17 @@ jobs:
               ParameterKey=DBPassword,ParameterValue="$DB_PASSWORD" \
             --region "$AWS_REGION"
 
+          echo "CloudFormation create request submitted."
+
 
       # =====================================================
-      # WAIT FOR CREATE
+      # 8. WAIT FOR STACK CREATION
+      # =====================================================
+      #
+      # IMPORTANT:
+      # If CloudFormation fails, this step prints the actual
+      # CREATE_FAILED resource and reason instead of showing
+      # only ROLLBACK_COMPLETE.
       # =====================================================
 
       - name: Wait for stack creation
@@ -115,13 +157,70 @@ jobs:
 
         run: |
 
-          aws cloudformation wait stack-create-complete \
+          echo "Waiting for CloudFormation stack creation..."
+
+          if aws cloudformation wait stack-create-complete \
             --stack-name "$STACK_NAME" \
-            --region "$AWS_REGION"
+            --region "$AWS_REGION"; then
+
+            echo ""
+            echo "=========================================="
+            echo "DATA STACK CREATED SUCCESSFULLY"
+            echo "=========================================="
+
+          else
+
+            echo ""
+            echo "=========================================="
+            echo "DATA STACK CREATION FAILED"
+            echo "=========================================="
+
+            echo ""
+            echo "CloudFormation stack status:"
+
+            aws cloudformation describe-stacks \
+              --stack-name "$STACK_NAME" \
+              --region "$AWS_REGION" \
+              --query "Stacks[0].StackStatus" \
+              --output text || true
+
+
+            echo ""
+            echo "=========================================="
+            echo "CREATE FAILED RESOURCES"
+            echo "=========================================="
+
+            aws cloudformation describe-stack-events \
+              --stack-name "$STACK_NAME" \
+              --region "$AWS_REGION" \
+              --query "StackEvents[?ResourceStatus=='CREATE_FAILED'].[LogicalResourceId,ResourceStatus,ResourceStatusReason]" \
+              --output table || true
+
+
+            echo ""
+            echo "=========================================="
+            echo "RECENT CLOUDFORMATION EVENTS"
+            echo "=========================================="
+
+            aws cloudformation describe-stack-events \
+              --stack-name "$STACK_NAME" \
+              --region "$AWS_REGION" \
+              --query "StackEvents[0:20].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]" \
+              --output table || true
+
+
+            echo ""
+            echo "=========================================="
+            echo "STACK CREATION FAILED"
+            echo "=========================================="
+
+            exit 1
+
+          fi
 
 
       # =====================================================
-      # CREATE CHANGE SET FOR EXISTING STACK
+      # 9. CREATE CHANGE SET FOR EXISTING STACK
       # =====================================================
 
       - name: Create Data Change Set
@@ -133,6 +232,9 @@ jobs:
         run: |
 
           CHANGE_SET_NAME="data-${GITHUB_SHA}"
+
+          echo "Creating CloudFormation change set..."
+          echo "Change Set: $CHANGE_SET_NAME"
 
           aws cloudformation create-change-set \
             --stack-name "$STACK_NAME" \
@@ -148,7 +250,7 @@ jobs:
 
 
       # =====================================================
-      # WAIT FOR CHANGE SET
+      # 10. WAIT FOR CHANGE SET
       # =====================================================
 
       - name: Wait for Change Set
@@ -158,14 +260,59 @@ jobs:
 
           CHANGE_SET_NAME="data-${GITHUB_SHA}"
 
-          aws cloudformation wait change-set-create-complete \
+          echo "Waiting for change set..."
+
+          if aws cloudformation wait change-set-create-complete \
             --stack-name "$STACK_NAME" \
             --change-set-name "$CHANGE_SET_NAME" \
-            --region "$AWS_REGION"
+            --region "$AWS_REGION"; then
+
+            echo "Change set created successfully."
+
+          else
+
+            echo ""
+            echo "=========================================="
+            echo "CHANGE SET CREATION FAILED"
+            echo "=========================================="
+
+            aws cloudformation describe-change-set \
+              --stack-name "$STACK_NAME" \
+              --change-set-name "$CHANGE_SET_NAME" \
+              --region "$AWS_REGION" \
+              --query "StatusReason" \
+              --output text || true
+
+            exit 1
+
+          fi
 
 
       # =====================================================
-      # EXECUTE CHANGE SET
+      # 11. DISPLAY CHANGE SET
+      # =====================================================
+
+      - name: Display Change Set
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="data-${GITHUB_SHA}"
+
+          echo "=========================================="
+          echo "CLOUDFORMATION CHANGES"
+          echo "=========================================="
+
+          aws cloudformation describe-change-set \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$AWS_REGION" \
+            --query "Changes[].ResourceChange.[Action,LogicalResourceId,ResourceType]" \
+            --output table
+
+
+      # =====================================================
+      # 12. EXECUTE CHANGE SET
       # =====================================================
 
       - name: Execute Change Set
@@ -175,6 +322,8 @@ jobs:
 
           CHANGE_SET_NAME="data-${GITHUB_SHA}"
 
+          echo "Executing change set..."
+
           aws cloudformation execute-change-set \
             --stack-name "$STACK_NAME" \
             --change-set-name "$CHANGE_SET_NAME" \
@@ -182,7 +331,7 @@ jobs:
 
 
       # =====================================================
-      # WAIT FOR UPDATE
+      # 13. WAIT FOR STACK UPDATE
       # =====================================================
 
       - name: Wait for stack update
@@ -190,20 +339,78 @@ jobs:
 
         run: |
 
-          aws cloudformation wait stack-update-complete \
+          echo "Waiting for CloudFormation stack update..."
+
+          if aws cloudformation wait stack-update-complete \
             --stack-name "$STACK_NAME" \
-            --region "$AWS_REGION"
+            --region "$AWS_REGION"; then
+
+            echo ""
+            echo "=========================================="
+            echo "DATA STACK UPDATED SUCCESSFULLY"
+            echo "=========================================="
+
+          else
+
+            echo ""
+            echo "=========================================="
+            echo "DATA STACK UPDATE FAILED"
+            echo "=========================================="
+
+            echo ""
+            echo "Current stack status:"
+
+            aws cloudformation describe-stacks \
+              --stack-name "$STACK_NAME" \
+              --region "$AWS_REGION" \
+              --query "Stacks[0].StackStatus" \
+              --output text || true
+
+
+            echo ""
+            echo "=========================================="
+            echo "FAILED RESOURCES"
+            echo "=========================================="
+
+            aws cloudformation describe-stack-events \
+              --stack-name "$STACK_NAME" \
+              --region "$AWS_REGION" \
+              --query "StackEvents[?ResourceStatus=='UPDATE_FAILED'].[LogicalResourceId,ResourceStatus,ResourceStatusReason]" \
+              --output table || true
+
+
+            echo ""
+            echo "=========================================="
+            echo "RECENT CLOUDFORMATION EVENTS"
+            echo "=========================================="
+
+            aws cloudformation describe-stack-events \
+              --stack-name "$STACK_NAME" \
+              --region "$AWS_REGION" \
+              --query "StackEvents[0:20].[Timestamp,LogicalResourceId,ResourceStatus,ResourceStatusReason]" \
+              --output table || true
+
+
+            exit 1
+
+          fi
 
 
       # =====================================================
-      # DISPLAY OUTPUTS
+      # 14. DISPLAY DATA STACK OUTPUTS
       # =====================================================
 
       - name: Display Data Stack outputs
 
         run: |
 
+          echo ""
+          echo "=========================================="
+          echo "DATA STACK OUTPUTS"
+          echo "=========================================="
+
           aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
             --region "$AWS_REGION" \
-            --query "Stacks[0].Outputs"
+            --query "Stacks[0].Outputs" \
+            --output table
