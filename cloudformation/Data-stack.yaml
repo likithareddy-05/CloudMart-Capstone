@@ -1,0 +1,278 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  CloudMart Data Stack.
+  Creates a Single-AZ RDS MySQL database and
+  an S3 bucket using the existing CloudMart network.
+
+Parameters:
+
+  Environment:
+    Type: String
+    Default: dev
+
+    AllowedValues:
+      - dev
+      - test
+      - prod
+
+  DBName:
+    Type: String
+    Default: cloudmart
+
+  DBUsername:
+    Type: String
+    Default: cloudmartadmin
+
+
+Resources:
+
+  # =========================================================
+  # RDS SUBNET GROUP
+  # =========================================================
+
+  # RDS requires subnets in at least two Availability Zones
+  # for a DB subnet group.
+  #
+  # The database itself will remain Single-AZ.
+
+  RdsSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+
+    Properties:
+
+      DBSubnetGroupDescription:
+        CloudMart private subnet group for RDS MySQL
+
+      SubnetIds:
+        - Fn::ImportValue:
+            !Sub CloudMart-${Environment}-PrivateSubnetId
+
+        - Fn::ImportValue:
+            !Sub CloudMart-${Environment}-PrivateSubnet2Id
+
+      Tags:
+        - Key: Name
+          Value: !Sub cloudmart-${Environment}-rds-subnet-group
+
+
+  # =========================================================
+  # RDS MYSQL INSTANCE
+  # =========================================================
+
+  CloudMartDatabase:
+    Type: AWS::RDS::DBInstance
+
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+
+    Properties:
+
+      # -----------------------------------------------------
+      # Engine
+      # -----------------------------------------------------
+
+      Engine: mysql
+
+      EngineVersion: '8.0'
+
+      DBInstanceClass: db.t3.micro
+
+      # -----------------------------------------------------
+      # Database configuration
+      # -----------------------------------------------------
+
+      DBName:
+        !Ref DBName
+
+      MasterUsername:
+        !Ref DBUsername
+
+      MasterUserPassword:
+        !Sub '{{resolve:ssm-secure:/cloudmart/${Environment}/db/password}}'
+
+      Port: 3306
+
+      # -----------------------------------------------------
+      # Storage
+      # -----------------------------------------------------
+
+      AllocatedStorage: 20
+
+      StorageType: gp3
+
+      StorageEncrypted: true
+
+      # -----------------------------------------------------
+      # Networking
+      # -----------------------------------------------------
+
+      DBSubnetGroupName:
+        !Ref RdsSubnetGroup
+
+      VPCSecurityGroups:
+
+        - Fn::ImportValue:
+            !Sub CloudMart-${Environment}-RdsSecurityGroupId
+
+      PubliclyAccessible: false
+
+      # -----------------------------------------------------
+      # Availability
+      # -----------------------------------------------------
+
+      # Single-AZ database.
+      # The subnet group contains two AZs only because
+      # RDS requires this for the subnet group.
+
+      MultiAZ: false
+
+      # -----------------------------------------------------
+      # Backup
+      # -----------------------------------------------------
+
+      BackupRetentionPeriod: 7
+
+      # -----------------------------------------------------
+      # Maintenance
+      # -----------------------------------------------------
+
+      AutoMinorVersionUpgrade: true
+
+      # -----------------------------------------------------
+      # Monitoring
+      # -----------------------------------------------------
+
+      EnableCloudwatchLogsExports:
+        - error
+        - general
+        - slowquery
+
+      Tags:
+        - Key: Name
+          Value: !Sub cloudmart-${Environment}-mysql
+
+
+  # =========================================================
+  # S3 BUCKET
+  # =========================================================
+
+  CloudMartProductBucket:
+    Type: AWS::S3::Bucket
+
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+
+    Properties:
+
+      BucketEncryption:
+
+        ServerSideEncryptionConfiguration:
+
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+      PublicAccessBlockConfiguration:
+
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+      VersioningConfiguration:
+        Status: Enabled
+
+      Tags:
+
+        - Key: Name
+          Value: !Sub cloudmart-${Environment}-product-bucket
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+# ===========================================================
+# OUTPUTS
+# ===========================================================
+
+Outputs:
+
+
+  # =========================================================
+  # RDS ENDPOINT
+  # =========================================================
+
+  RdsEndpoint:
+    Description:
+      CloudMart RDS MySQL endpoint
+
+    Value:
+      !GetAtt CloudMartDatabase.Endpoint.Address
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-RdsEndpoint
+
+
+  # =========================================================
+  # RDS PORT
+  # =========================================================
+
+  RdsPort:
+    Description:
+      CloudMart RDS MySQL port
+
+    Value:
+      !GetAtt CloudMartDatabase.Endpoint.Port
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-RdsPort
+
+
+  # =========================================================
+  # RDS DATABASE NAME
+  # =========================================================
+
+  RdsDatabaseName:
+    Description:
+      CloudMart database name
+
+    Value:
+      !Ref DBName
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-RdsDatabaseName
+
+
+  # =========================================================
+  # RDS INSTANCE IDENTIFIER
+  # =========================================================
+
+  RdsInstanceIdentifier:
+    Description:
+      CloudMart RDS instance identifier
+
+    Value:
+      !Ref CloudMartDatabase
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-RdsInstanceIdentifier
+
+
+  # =========================================================
+  # S3 BUCKET
+  # =========================================================
+
+  ProductBucketName:
+    Description:
+      CloudMart product S3 bucket
+
+    Value:
+      !Ref CloudMartProductBucket
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-ProductBucketName
