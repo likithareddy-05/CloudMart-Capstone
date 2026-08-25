@@ -2,7 +2,14 @@ AWSTemplateFormatVersion: '2010-09-09'
 
 Description: >
   CloudMart Security Stack.
-  Creates IAM execution role for the Lambda Authorizer.
+  Creates IAM execution roles for CloudMart Lambda functions
+  with least-privilege permissions for CloudWatch Logs,
+  SSM Parameter Store, EventBridge, SNS and S3.
+
+
+# =========================================================
+# PARAMETERS
+# =========================================================
 
 Parameters:
 
@@ -15,12 +22,31 @@ Parameters:
       - test
       - prod
 
+    Description: Deployment environment
+
+
+# =========================================================
+# CONDITIONS
+# =========================================================
+
+Conditions:
+
+  IsProd:
+    !Equals
+      - !Ref Environment
+      - prod
+
+
+# =========================================================
+# RESOURCES
+# =========================================================
 
 Resources:
 
-  # =========================================================
-  # Lambda Authorizer IAM Role
-  # =========================================================
+
+  # =======================================================
+  # 1. AUTHORIZER LAMBDA ROLE
+  # =======================================================
 
   AuthorizerLambdaRole:
     Type: AWS::IAM::Role
@@ -28,14 +54,11 @@ Resources:
     Properties:
 
       RoleName:
-        !Sub cloudmart-${Environment}-authorizer-role
+        !Sub CloudMart-${Environment}-AuthorizerLambdaRole
 
       Description:
-        !Sub >
-          IAM execution role for CloudMart ${Environment}
-          Lambda Authorizer.
+        IAM execution role for CloudMart Lambda Authorizer
 
-      # Lambda is allowed to assume this role
       AssumeRolePolicyDocument:
 
         Version: '2012-10-17'
@@ -52,14 +75,15 @@ Resources:
               - sts:AssumeRole
 
 
+      ManagedPolicyArns:
+
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+
       Policies:
 
-        # ---------------------------------------------------
-        # SSM permission
-        # ---------------------------------------------------
-
         - PolicyName:
-            !Sub cloudmart-${Environment}-authorizer-ssm
+            !Sub CloudMart-${Environment}-AuthorizerSSMAccess
 
           PolicyDocument:
 
@@ -67,7 +91,11 @@ Resources:
 
             Statement:
 
-              - Sid: ReadAuthenticationToken
+              # -------------------------------------------
+              # Read authentication token from SSM
+              # -------------------------------------------
+
+              - Sid: ReadAuthToken
 
                 Effect: Allow
 
@@ -75,16 +103,49 @@ Resources:
                   - ssm:GetParameter
 
                 Resource:
-                  !Sub >
-                    arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudmart/${Environment}/auth/token
+                  !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudmart/${Environment}/auth/token
 
 
-        # ---------------------------------------------------
-        # CloudWatch Logs permission
-        # ---------------------------------------------------
+  # =======================================================
+  # 2. PRODUCT LAMBDA ROLE
+  # =======================================================
+
+  ProductLambdaRole:
+    Type: AWS::IAM::Role
+
+    Properties:
+
+      RoleName:
+        !Sub CloudMart-${Environment}-ProductLambdaRole
+
+      Description:
+        IAM execution role for CloudMart Product Lambda
+
+      AssumeRolePolicyDocument:
+
+        Version: '2012-10-17'
+
+        Statement:
+
+          - Effect: Allow
+
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+
+            Action:
+              - sts:AssumeRole
+
+
+      ManagedPolicyArns:
+
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+
+      Policies:
 
         - PolicyName:
-            !Sub cloudmart-${Environment}-authorizer-logs
+            !Sub CloudMart-${Environment}-ProductAccess
 
           PolicyDocument:
 
@@ -92,63 +153,396 @@ Resources:
 
             Statement:
 
-              - Sid: CreateLogStream
+              # -------------------------------------------
+              # Read database configuration from SSM
+              # -------------------------------------------
+
+              - Sid: ReadDatabaseParameters
 
                 Effect: Allow
 
                 Action:
-                  - logs:CreateLogStream
+                  - ssm:GetParameter
+                  - ssm:GetParameters
 
                 Resource:
-                  !Sub >
-                    arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/cloudmart-${Environment}-authorizer:*
 
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudmart/${Environment}/db/*
 
-              - Sid: WriteLogEvents
+              # -------------------------------------------
+              # Publish inventory events
+              # -------------------------------------------
+
+              - Sid: PublishInventoryEvents
 
                 Effect: Allow
 
                 Action:
-                  - logs:PutLogEvents
+                  - events:PutEvents
+
+                Resource: '*'
+
+
+  # =======================================================
+  # 3. ORDER LAMBDA ROLE
+  # =======================================================
+
+  OrderLambdaRole:
+    Type: AWS::IAM::Role
+
+    Properties:
+
+      RoleName:
+        !Sub CloudMart-${Environment}-OrderLambdaRole
+
+      Description:
+        IAM execution role for CloudMart Order Lambda
+
+      AssumeRolePolicyDocument:
+
+        Version: '2012-10-17'
+
+        Statement:
+
+          - Effect: Allow
+
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+
+            Action:
+              - sts:AssumeRole
+
+
+      ManagedPolicyArns:
+
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+
+      Policies:
+
+        - PolicyName:
+            !Sub CloudMart-${Environment}-OrderAccess
+
+          PolicyDocument:
+
+            Version: '2012-10-17'
+
+            Statement:
+
+              # -------------------------------------------
+              # Read DB credentials/configuration
+              # -------------------------------------------
+
+              - Sid: ReadDatabaseParameters
+
+                Effect: Allow
+
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
 
                 Resource:
-                  !Sub >
-                    arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/cloudmart-${Environment}-authorizer:*
 
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudmart/${Environment}/db/*
+
+              # -------------------------------------------
+              # Publish order events
+              # -------------------------------------------
+
+              - Sid: PublishOrderEvents
+
+                Effect: Allow
+
+                Action:
+                  - events:PutEvents
+
+                Resource: '*'
+
+              # -------------------------------------------
+              # Publish notifications
+              # -------------------------------------------
+
+              - Sid: PublishNotifications
+
+                Effect: Allow
+
+                Action:
+                  - sns:Publish
+
+                Resource: '*'
+
+
+  # =======================================================
+  # 4. INVENTORY ALERT LAMBDA ROLE
+  # =======================================================
+
+  InventoryAlertLambdaRole:
+    Type: AWS::IAM::Role
+
+    Properties:
+
+      RoleName:
+        !Sub CloudMart-${Environment}-InventoryAlertLambdaRole
+
+      Description:
+        IAM execution role for CloudMart Inventory Alert Lambda
+
+      AssumeRolePolicyDocument:
+
+        Version: '2012-10-17'
+
+        Statement:
+
+          - Effect: Allow
+
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+
+            Action:
+              - sts:AssumeRole
+
+
+      ManagedPolicyArns:
+
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+
+      Policies:
+
+        - PolicyName:
+            !Sub CloudMart-${Environment}-InventoryAlertAccess
+
+          PolicyDocument:
+
+            Version: '2012-10-17'
+
+            Statement:
+
+              # -------------------------------------------
+              # Read database configuration
+              # -------------------------------------------
+
+              - Sid: ReadDatabaseParameters
+
+                Effect: Allow
+
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+
+                Resource:
+
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudmart/${Environment}/db/*
+
+              # -------------------------------------------
+              # Read low-stock threshold from SSM
+              # -------------------------------------------
+
+              - Sid: ReadLowStockConfiguration
+
+                Effect: Allow
+
+                Action:
+                  - ssm:GetParameter
+
+                Resource:
+                  !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudmart/${Environment}/inventory/*
+
+              # -------------------------------------------
+              # Publish low-stock notification
+              # -------------------------------------------
+
+              - Sid: PublishLowStockAlert
+
+                Effect: Allow
+
+                Action:
+                  - sns:Publish
+
+                Resource: '*'
+
+
+  # =======================================================
+  # 5. REPORT GENERATOR LAMBDA ROLE
+  # =======================================================
+
+  ReportGeneratorLambdaRole:
+    Type: AWS::IAM::Role
+
+    Properties:
+
+      RoleName:
+        !Sub CloudMart-${Environment}-ReportGeneratorLambdaRole
+
+      Description:
+        IAM execution role for CloudMart Report Generator Lambda
+
+      AssumeRolePolicyDocument:
+
+        Version: '2012-10-17'
+
+        Statement:
+
+          - Effect: Allow
+
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+
+            Action:
+              - sts:AssumeRole
+
+
+      ManagedPolicyArns:
+
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+
+      Policies:
+
+        - PolicyName:
+            !Sub CloudMart-${Environment}-ReportAccess
+
+          PolicyDocument:
+
+            Version: '2012-10-17'
+
+            Statement:
+
+              # -------------------------------------------
+              # Read DB configuration
+              # -------------------------------------------
+
+              - Sid: ReadDatabaseParameters
+
+                Effect: Allow
+
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+
+                Resource:
+
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudmart/${Environment}/db/*
+
+              # -------------------------------------------
+              # Write generated reports to S3
+              # -------------------------------------------
+
+              - Sid: WriteReports
+
+                Effect: Allow
+
+                Action:
+                  - s3:PutObject
+
+                Resource:
+                  !Sub arn:${AWS::Partition}:s3:::cloudmart-${Environment}-reports-${AWS::AccountId}/*
+
+              # -------------------------------------------
+              # Read report bucket if required
+              # -------------------------------------------
+
+              - Sid: ReadReports
+
+                Effect: Allow
+
+                Action:
+                  - s3:GetObject
+
+                Resource:
+                  !Sub arn:${AWS::Partition}:s3:::cloudmart-${Environment}-reports-${AWS::AccountId}/*
+
+
+# =========================================================
+# OUTPUTS
+# =========================================================
 
 Outputs:
 
-  # =========================================================
-  # Authorizer Role ARN
-  # =========================================================
+
+  # =======================================================
+  # AUTHORIZER ROLE
+  # =======================================================
 
   AuthorizerLambdaRoleArn:
 
     Description:
-      IAM role ARN used by the Lambda Authorizer.
+      ARN of the CloudMart Authorizer Lambda IAM role
 
     Value:
       !GetAtt AuthorizerLambdaRole.Arn
 
     Export:
-
       Name:
         !Sub CloudMart-${Environment}-AuthorizerLambdaRoleArn
 
 
-  # =========================================================
-  # Authorizer Role Name
-  # =========================================================
+  # =======================================================
+  # PRODUCT ROLE
+  # =======================================================
 
-  AuthorizerLambdaRoleName:
+  ProductLambdaRoleArn:
 
     Description:
-      IAM role name used by the Lambda Authorizer.
+      ARN of the CloudMart Product Lambda IAM role
 
     Value:
-      !Ref AuthorizerLambdaRole
+      !GetAtt ProductLambdaRole.Arn
 
     Export:
-
       Name:
-        !Sub CloudMart-${Environment}-AuthorizerLambdaRoleName
+        !Sub CloudMart-${Environment}-ProductLambdaRoleArn
+
+
+  # =======================================================
+  # ORDER ROLE
+  # =======================================================
+
+  OrderLambdaRoleArn:
+
+    Description:
+      ARN of the CloudMart Order Lambda IAM role
+
+    Value:
+      !GetAtt OrderLambdaRole.Arn
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-OrderLambdaRoleArn
+
+
+  # =======================================================
+  # INVENTORY ALERT ROLE
+  # =======================================================
+
+  InventoryAlertLambdaRoleArn:
+
+    Description:
+      ARN of the CloudMart Inventory Alert Lambda IAM role
+
+    Value:
+      !GetAtt InventoryAlertLambdaRole.Arn
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-InventoryAlertLambdaRoleArn
+
+
+  # =======================================================
+  # REPORT GENERATOR ROLE
+  # =======================================================
+
+  ReportGeneratorLambdaRoleArn:
+
+    Description:
+      ARN of the CloudMart Report Generator Lambda IAM role
+
+    Value:
+      !GetAtt ReportGeneratorLambdaRole.Arn
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-ReportGeneratorLambdaRoleArn

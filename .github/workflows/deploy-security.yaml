@@ -1,0 +1,227 @@
+name: Deploy Security Stack
+
+
+on:
+
+  workflow_dispatch:
+
+
+permissions:
+
+  id-token: write
+  contents: read
+
+
+env:
+
+  AWS_REGION: ap-south-1
+
+  ENVIRONMENT: dev
+
+  STACK_NAME: cloudmart-dev-security
+
+
+jobs:
+
+  deploy:
+
+    runs-on: ubuntu-latest
+
+
+    steps:
+
+
+      # ===================================================
+      # 1. CHECKOUT
+      # ===================================================
+
+      - name: Checkout repository
+
+        uses: actions/checkout@v4
+
+
+      # ===================================================
+      # 2. CONFIGURE AWS CREDENTIALS
+      # ===================================================
+
+      - name: Configure AWS credentials
+
+        uses: aws-actions/configure-aws-credentials@v4
+
+        with:
+
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # ===================================================
+      # 3. VERIFY AWS ACCESS
+      # ===================================================
+
+      - name: Verify AWS identity
+
+        run: |
+
+          aws sts get-caller-identity
+
+
+      # ===================================================
+      # 4. VALIDATE CLOUDFORMATION TEMPLATE
+      # ===================================================
+
+      - name: Validate Security Stack
+
+        run: |
+
+          aws cloudformation validate-template \
+            --template-body file://cloudformation/Security-stack.yaml \
+            --region "$AWS_REGION"
+
+
+      # ===================================================
+      # 5. CHECK WHETHER STACK EXISTS
+      # ===================================================
+
+      - name: Check Security Stack
+
+        id: stack
+
+        run: |
+
+          if aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            > /dev/null 2>&1
+
+          then
+
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+
+          else
+
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+
+          fi
+
+
+      # ===================================================
+      # 6. CREATE STACK
+      # ===================================================
+
+      - name: Create Security Stack
+
+        if: steps.stack.outputs.exists == 'false'
+
+        run: |
+
+          aws cloudformation create-stack \
+            --stack-name "$STACK_NAME" \
+            --template-body file://cloudformation/Security-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION"
+
+
+      # ===================================================
+      # 7. WAIT FOR CREATE
+      # ===================================================
+
+      - name: Wait for Security Stack creation
+
+        if: steps.stack.outputs.exists == 'false'
+
+        run: |
+
+          aws cloudformation wait stack-create-complete \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+
+      # ===================================================
+      # 8. CREATE CHANGE SET FOR EXISTING STACK
+      # ===================================================
+
+      - name: Create Security Change Set
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="security-${GITHUB_SHA}"
+
+          aws cloudformation create-change-set \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --change-set-type UPDATE \
+            --template-body file://cloudformation/Security-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION"
+
+
+      # ===================================================
+      # 9. WAIT FOR CHANGE SET
+      # ===================================================
+
+      - name: Wait for Security Change Set
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="security-${GITHUB_SHA}"
+
+          aws cloudformation wait change-set-create-complete \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$AWS_REGION"
+
+
+      # ===================================================
+      # 10. EXECUTE CHANGE SET
+      # ===================================================
+
+      - name: Execute Security Change Set
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="security-${GITHUB_SHA}"
+
+          aws cloudformation execute-change-set \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$AWS_REGION"
+
+
+      # ===================================================
+      # 11. WAIT FOR UPDATE
+      # ===================================================
+
+      - name: Wait for Security Stack update
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          aws cloudformation wait stack-update-complete \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+
+      # ===================================================
+      # 12. DISPLAY OUTPUTS
+      # ===================================================
+
+      - name: Display Security Stack outputs
+
+        run: |
+
+          aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs"
