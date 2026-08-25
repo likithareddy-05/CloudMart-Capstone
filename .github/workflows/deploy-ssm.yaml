@@ -1,0 +1,238 @@
+name: Deploy SSM Parameters
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  ENVIRONMENT: dev
+  DATA_STACK_NAME: cloudmart-dev-data
+
+jobs:
+
+  deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # =====================================================
+      # 1. CHECKOUT REPOSITORY
+      # =====================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # =====================================================
+      # 2. CONFIGURE AWS CREDENTIALS
+      # =====================================================
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # =====================================================
+      # 3. VERIFY AWS IDENTITY
+      # =====================================================
+
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+
+      # =====================================================
+      # 4. GET RDS INFORMATION
+      # =====================================================
+
+      - name: Get RDS outputs
+        id: rds
+        run: |
+
+          echo "Getting RDS information from Data Stack..."
+
+          RDS_ENDPOINT=$(aws cloudformation describe-stacks \
+            --stack-name "$DATA_STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='RdsEndpoint'].OutputValue" \
+            --output text)
+
+          RDS_PORT=$(aws cloudformation describe-stacks \
+            --stack-name "$DATA_STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='RdsPort'].OutputValue" \
+            --output text)
+
+          RDS_DATABASE=$(aws cloudformation describe-stacks \
+            --stack-name "$DATA_STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='RdsDatabaseName'].OutputValue" \
+            --output text)
+
+          RDS_USERNAME=$(aws cloudformation describe-stacks \
+            --stack-name "$DATA_STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='RdsUsername'].OutputValue" \
+            --output text)
+
+
+          # Do not print password or any secret.
+
+          echo "RDS endpoint retrieved."
+          echo "RDS port retrieved."
+          echo "RDS database name retrieved."
+          echo "RDS username retrieved."
+
+
+          # Basic validation
+
+          if [ -z "$RDS_ENDPOINT" ] || [ "$RDS_ENDPOINT" = "None" ]; then
+            echo "ERROR: RDS endpoint was not found."
+            exit 1
+          fi
+
+          if [ -z "$RDS_DATABASE" ] || [ "$RDS_DATABASE" = "None" ]; then
+            echo "ERROR: RDS database name was not found."
+            exit 1
+          fi
+
+          if [ -z "$RDS_USERNAME" ] || [ "$RDS_USERNAME" = "None" ]; then
+            echo "ERROR: RDS username was not found."
+            exit 1
+          fi
+
+
+          echo "RDS_ENDPOINT=$RDS_ENDPOINT" >> "$GITHUB_OUTPUT"
+          echo "RDS_PORT=$RDS_PORT" >> "$GITHUB_OUTPUT"
+          echo "RDS_DATABASE=$RDS_DATABASE" >> "$GITHUB_OUTPUT"
+          echo "RDS_USERNAME=$RDS_USERNAME" >> "$GITHUB_OUTPUT"
+
+
+      # =====================================================
+      # 5. CREATE DB HOST PARAMETER
+      # =====================================================
+
+      - name: Create DB host parameter
+        run: |
+
+          aws ssm put-parameter \
+            --name "/cloudmart/$ENVIRONMENT/db/host" \
+            --type "String" \
+            --value "${{ steps.rds.outputs.RDS_ENDPOINT }}" \
+            --overwrite \
+            --region "$AWS_REGION"
+
+          echo "DB host parameter created/updated."
+
+
+      # =====================================================
+      # 6. CREATE DB PORT PARAMETER
+      # =====================================================
+
+      - name: Create DB port parameter
+        run: |
+
+          aws ssm put-parameter \
+            --name "/cloudmart/$ENVIRONMENT/db/port" \
+            --type "String" \
+            --value "${{ steps.rds.outputs.RDS_PORT }}" \
+            --overwrite \
+            --region "$AWS_REGION"
+
+          echo "DB port parameter created/updated."
+
+
+      # =====================================================
+      # 7. CREATE DB NAME PARAMETER
+      # =====================================================
+
+      - name: Create DB name parameter
+        run: |
+
+          aws ssm put-parameter \
+            --name "/cloudmart/$ENVIRONMENT/db/name" \
+            --type "String" \
+            --value "${{ steps.rds.outputs.RDS_DATABASE }}" \
+            --overwrite \
+            --region "$AWS_REGION"
+
+          echo "DB name parameter created/updated."
+
+
+      # =====================================================
+      # 8. CREATE DB USERNAME PARAMETER
+      # =====================================================
+
+      - name: Create DB username parameter
+        run: |
+
+          aws ssm put-parameter \
+            --name "/cloudmart/$ENVIRONMENT/db/username" \
+            --type "String" \
+            --value "${{ steps.rds.outputs.RDS_USERNAME }}" \
+            --overwrite \
+            --region "$AWS_REGION"
+
+          echo "DB username parameter created/updated."
+
+
+      # =====================================================
+      # 9. CREATE DB PASSWORD PARAMETER
+      # =====================================================
+      #
+      # IMPORTANT:
+      # Password is stored as SecureString.
+      #
+      # The actual password is never printed.
+      # =====================================================
+
+      - name: Create DB password parameter
+        env:
+          DB_PASSWORD: ${{ secrets.CLOUDMART_DB_PASSWORD }}
+
+        run: |
+
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "ERROR: CLOUDMART_DB_PASSWORD GitHub secret is missing."
+            exit 1
+          fi
+
+          aws ssm put-parameter \
+            --name "/cloudmart/$ENVIRONMENT/db/password" \
+            --type "SecureString" \
+            --value "$DB_PASSWORD" \
+            --overwrite \
+            --region "$AWS_REGION"
+
+          echo "DB password SecureString created/updated."
+
+
+      # =====================================================
+      # 10. VERIFY PARAMETERS
+      # =====================================================
+      #
+      # Only parameter names/types are displayed.
+      # Values are NOT displayed.
+      # =====================================================
+
+      - name: Verify SSM parameters
+        run: |
+
+          echo "=========================================="
+          echo "SSM PARAMETERS"
+          echo "=========================================="
+
+          aws ssm describe-parameters \
+            --parameter-filters \
+              "Key=Name,Option=BeginsWith,Values=/cloudmart/$ENVIRONMENT/db/" \
+            --region "$AWS_REGION" \
+            --query "Parameters[].{Name:Name,Type:Type}" \
+            --output table
