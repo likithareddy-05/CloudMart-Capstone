@@ -47,8 +47,8 @@ Parameters:
     MaxLength: 41
 
     Description: >
-      RDS master password. Supplied securely by the
-      GitHub Actions deployment workflow.
+      RDS master password supplied securely through
+      the GitHub Actions deployment workflow.
 
 
 # =========================================================
@@ -62,14 +62,13 @@ Resources:
   # RDS DB SUBNET GROUP
   # =======================================================
   #
-  # IMPORTANT:
   # AWS requires an RDS DB subnet group to contain
   # subnets in at least two Availability Zones.
   #
   # This does NOT make the RDS instance Multi-AZ.
-  # The RDS instance below uses MultiAZ: false.
   #
-  # The second subnet exists only for this AWS requirement.
+  # The actual RDS instance remains Single-AZ
+  # because MultiAZ is set to false below.
   # =======================================================
 
   RdsSubnetGroup:
@@ -82,11 +81,19 @@ Resources:
 
       SubnetIds:
 
+        # -------------------------------------------------
         # Primary private subnet
+        # -------------------------------------------------
+
         - Fn::ImportValue:
             !Sub CloudMart-${Environment}-PrivateSubnetId
 
-        # RDS supporting subnet in second AZ
+        # -------------------------------------------------
+        # Second private subnet in another AZ.
+        # Used only to satisfy the RDS subnet group
+        # requirement.
+        # -------------------------------------------------
+
         - Fn::ImportValue:
             !Sub CloudMart-${Environment}-RdsSupportPrivateSubnetId
 
@@ -100,31 +107,46 @@ Resources:
 
 
   # =======================================================
-  # RDS MYSQL
+  # RDS MYSQL DATABASE
   # =======================================================
 
   CloudMartDatabase:
     Type: AWS::RDS::DBInstance
 
+    # -----------------------------------------------------
+    # If the stack is deleted, CloudFormation attempts
+    # to create a final snapshot.
+    # -----------------------------------------------------
+
     DeletionPolicy: Snapshot
+
     UpdateReplacePolicy: Snapshot
 
     Properties:
 
-      # ---------------------------------------------------
-      # Engine
-      # ---------------------------------------------------
+
+      # ===================================================
+      # DATABASE ENGINE
+      # ===================================================
 
       Engine: mysql
 
       EngineVersion: '8.0'
 
+
+      # ===================================================
+      # INSTANCE CLASS
+      # ===================================================
+
+      # Free Tier-compatible small instance for the
+      # CloudMart development environment.
+
       DBInstanceClass: db.t3.micro
 
 
-      # ---------------------------------------------------
-      # Database
-      # ---------------------------------------------------
+      # ===================================================
+      # DATABASE CONFIGURATION
+      # ===================================================
 
       DBName:
         !Ref DBName
@@ -138,20 +160,28 @@ Resources:
       Port: 3306
 
 
-      # ---------------------------------------------------
-      # Storage
-      # ---------------------------------------------------
+      # ===================================================
+      # STORAGE
+      # ===================================================
 
       AllocatedStorage: 20
 
       StorageType: gp3
 
-      StorageEncrypted: true
+
+      # ===================================================
+      # STORAGE ENCRYPTION
+      # ===================================================
+      #
+      # Disabled for the current Free Tier configuration.
+      # ===================================================
+
+      StorageEncrypted: false
 
 
-      # ---------------------------------------------------
-      # Networking
-      # ---------------------------------------------------
+      # ===================================================
+      # NETWORKING
+      # ===================================================
 
       DBSubnetGroupName:
         !Ref RdsSubnetGroup
@@ -161,38 +191,45 @@ Resources:
         - Fn::ImportValue:
             !Sub CloudMart-${Environment}-RdsSecurityGroupId
 
+      # RDS must remain private.
+      # It must not receive a public IP address.
+
       PubliclyAccessible: false
 
 
-      # ---------------------------------------------------
-      # SINGLE-AZ
-      # ---------------------------------------------------
+      # ===================================================
+      # SINGLE-AZ DEPLOYMENT
+      # ===================================================
       #
-      # The database itself is NOT Multi-AZ.
-      # The second subnet exists only for the DB subnet
-      # group requirement.
-      # ---------------------------------------------------
+      # The RDS instance itself is Single-AZ.
+      #
+      # The second subnet exists only because the
+      # DB subnet group requires subnets in multiple AZs.
+      # ===================================================
 
       MultiAZ: false
 
 
-      # ---------------------------------------------------
-      # Backup
-      # ---------------------------------------------------
+      # ===================================================
+      # AUTOMATED BACKUP RETENTION
+      # ===================================================
+      #
+      # Free Tier project configuration.
+      # ===================================================
 
-      BackupRetentionPeriod: 0
+      BackupRetentionPeriod: 7
 
 
-      # ---------------------------------------------------
-      # Maintenance
-      # ---------------------------------------------------
+      # ===================================================
+      # MAINTENANCE
+      # ===================================================
 
       AutoMinorVersionUpgrade: true
 
 
-      # ---------------------------------------------------
-      # CloudWatch Logs
-      # ---------------------------------------------------
+      # ===================================================
+      # CLOUDWATCH LOG EXPORTS
+      # ===================================================
 
       EnableCloudwatchLogsExports:
 
@@ -201,9 +238,9 @@ Resources:
         - slowquery
 
 
-      # ---------------------------------------------------
-      # Tags
-      # ---------------------------------------------------
+      # ===================================================
+      # TAGS
+      # ===================================================
 
       Tags:
 
@@ -221,26 +258,31 @@ Resources:
   CloudMartProductBucket:
     Type: AWS::S3::Bucket
 
+    # Keep the bucket if the CloudFormation stack is deleted.
+
     DeletionPolicy: Retain
+
     UpdateReplacePolicy: Retain
 
     Properties:
 
-      # ---------------------------------------------------
-      # Encryption
-      # ---------------------------------------------------
+
+      # ===================================================
+      # SERVER-SIDE ENCRYPTION
+      # ===================================================
 
       BucketEncryption:
 
         ServerSideEncryptionConfiguration:
 
           - ServerSideEncryptionByDefault:
+
               SSEAlgorithm: AES256
 
 
-      # ---------------------------------------------------
-      # Public Access Block
-      # ---------------------------------------------------
+      # ===================================================
+      # BLOCK PUBLIC ACCESS
+      # ===================================================
 
       PublicAccessBlockConfiguration:
 
@@ -253,18 +295,18 @@ Resources:
         RestrictPublicBuckets: true
 
 
-      # ---------------------------------------------------
-      # Versioning
-      # ---------------------------------------------------
+      # ===================================================
+      # VERSIONING
+      # ===================================================
 
       VersioningConfiguration:
 
         Status: Enabled
 
 
-      # ---------------------------------------------------
-      # Tags
-      # ---------------------------------------------------
+      # ===================================================
+      # TAGS
+      # ===================================================
 
       Tags:
 
@@ -283,7 +325,7 @@ Outputs:
 
 
   # =======================================================
-  # RDS INSTANCE ID
+  # RDS INSTANCE IDENTIFIER
   # =======================================================
 
   RdsInstanceIdentifier:
