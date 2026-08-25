@@ -1,0 +1,209 @@
+name: Deploy Data Stack
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  ENVIRONMENT: dev
+  STACK_NAME: cloudmart-dev-data
+
+jobs:
+
+  deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # =====================================================
+      # CHECKOUT
+      # =====================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # =====================================================
+      # AWS CREDENTIALS
+      # =====================================================
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # =====================================================
+      # VERIFY AWS IDENTITY
+      # =====================================================
+
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+
+      # =====================================================
+      # VALIDATE TEMPLATE
+      # =====================================================
+
+      - name: Validate Data Stack
+        run: |
+          aws cloudformation validate-template \
+            --template-body file://cloudformation/Data-stack.yaml \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # CHECK STACK
+      # =====================================================
+
+      - name: Check stack
+        id: stack
+
+        run: |
+
+          if aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            > /dev/null 2>&1; then
+
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+
+          else
+
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+
+          fi
+
+
+      # =====================================================
+      # CREATE STACK
+      # =====================================================
+
+      - name: Create Data Stack
+        if: steps.stack.outputs.exists == 'false'
+
+        env:
+          DB_PASSWORD: ${{ secrets.CLOUDMART_DB_PASSWORD }}
+
+        run: |
+
+          aws cloudformation create-stack \
+            --stack-name "$STACK_NAME" \
+            --template-body file://cloudformation/Data-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+              ParameterKey=DBName,ParameterValue="cloudmart" \
+              ParameterKey=DBUsername,ParameterValue="cloudmartadmin" \
+              ParameterKey=DBPassword,ParameterValue="$DB_PASSWORD" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # WAIT FOR CREATE
+      # =====================================================
+
+      - name: Wait for stack creation
+        if: steps.stack.outputs.exists == 'false'
+
+        run: |
+
+          aws cloudformation wait stack-create-complete \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # CREATE CHANGE SET FOR EXISTING STACK
+      # =====================================================
+
+      - name: Create Data Change Set
+        if: steps.stack.outputs.exists == 'true'
+
+        env:
+          DB_PASSWORD: ${{ secrets.CLOUDMART_DB_PASSWORD }}
+
+        run: |
+
+          CHANGE_SET_NAME="data-${GITHUB_SHA}"
+
+          aws cloudformation create-change-set \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --change-set-type UPDATE \
+            --template-body file://cloudformation/Data-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+              ParameterKey=DBName,ParameterValue="cloudmart" \
+              ParameterKey=DBUsername,ParameterValue="cloudmartadmin" \
+              ParameterKey=DBPassword,ParameterValue="$DB_PASSWORD" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # WAIT FOR CHANGE SET
+      # =====================================================
+
+      - name: Wait for Change Set
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="data-${GITHUB_SHA}"
+
+          aws cloudformation wait change-set-create-complete \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # EXECUTE CHANGE SET
+      # =====================================================
+
+      - name: Execute Change Set
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="data-${GITHUB_SHA}"
+
+          aws cloudformation execute-change-set \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # WAIT FOR UPDATE
+      # =====================================================
+
+      - name: Wait for stack update
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          aws cloudformation wait stack-update-complete \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # DISPLAY OUTPUTS
+      # =====================================================
+
+      - name: Display Data Stack outputs
+
+        run: |
+
+          aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs"

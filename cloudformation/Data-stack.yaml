@@ -2,8 +2,14 @@ AWSTemplateFormatVersion: '2010-09-09'
 
 Description: >
   CloudMart Data Stack.
-  Creates a Single-AZ RDS MySQL database and
-  an S3 bucket using the existing CloudMart network.
+  Creates the RDS MySQL database and S3 bucket.
+  RDS is deployed as Single-AZ. A second private subnet
+  is used only because AWS requires an RDS DB subnet group
+  to span at least two Availability Zones.
+
+# =========================================================
+# PARAMETERS
+# =========================================================
 
 Parameters:
 
@@ -16,25 +22,55 @@ Parameters:
       - test
       - prod
 
+    Description: Deployment environment
+
+
   DBName:
     Type: String
     Default: cloudmart
+
+    Description: CloudMart MySQL database name
+
 
   DBUsername:
     Type: String
     Default: cloudmartadmin
 
+    Description: RDS master username
+
+
+  DBPassword:
+    Type: String
+    NoEcho: true
+
+    MinLength: 8
+    MaxLength: 41
+
+    Description: >
+      RDS master password. Supplied securely by the
+      GitHub Actions deployment workflow.
+
+
+# =========================================================
+# RESOURCES
+# =========================================================
 
 Resources:
 
-  # =========================================================
-  # RDS SUBNET GROUP
-  # =========================================================
 
-  # RDS requires subnets in at least two Availability Zones
-  # for a DB subnet group.
+  # =======================================================
+  # RDS DB SUBNET GROUP
+  # =======================================================
   #
-  # The database itself will remain Single-AZ.
+  # IMPORTANT:
+  # AWS requires an RDS DB subnet group to contain
+  # subnets in at least two Availability Zones.
+  #
+  # This does NOT make the RDS instance Multi-AZ.
+  # The RDS instance below uses MultiAZ: false.
+  #
+  # The second subnet exists only for this AWS requirement.
+  # =======================================================
 
   RdsSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
@@ -42,23 +78,30 @@ Resources:
     Properties:
 
       DBSubnetGroupDescription:
-        CloudMart private subnet group for RDS MySQL
+        CloudMart RDS MySQL private subnet group
 
       SubnetIds:
+
+        # Primary private subnet
         - Fn::ImportValue:
             !Sub CloudMart-${Environment}-PrivateSubnetId
 
+        # RDS supporting subnet in second AZ
         - Fn::ImportValue:
-            !Sub CloudMart-${Environment}-PrivateSubnet2Id
+            !Sub CloudMart-${Environment}-RdsSupportPrivateSubnetId
 
       Tags:
+
         - Key: Name
           Value: !Sub cloudmart-${Environment}-rds-subnet-group
 
+        - Key: Environment
+          Value: !Ref Environment
 
-  # =========================================================
-  # RDS MYSQL INSTANCE
-  # =========================================================
+
+  # =======================================================
+  # RDS MYSQL
+  # =======================================================
 
   CloudMartDatabase:
     Type: AWS::RDS::DBInstance
@@ -68,9 +111,9 @@ Resources:
 
     Properties:
 
-      # -----------------------------------------------------
+      # ---------------------------------------------------
       # Engine
-      # -----------------------------------------------------
+      # ---------------------------------------------------
 
       Engine: mysql
 
@@ -78,9 +121,10 @@ Resources:
 
       DBInstanceClass: db.t3.micro
 
-      # -----------------------------------------------------
-      # Database configuration
-      # -----------------------------------------------------
+
+      # ---------------------------------------------------
+      # Database
+      # ---------------------------------------------------
 
       DBName:
         !Ref DBName
@@ -89,13 +133,14 @@ Resources:
         !Ref DBUsername
 
       MasterUserPassword:
-        !Sub '{{resolve:ssm-secure:/cloudmart/${Environment}/db/password}}'
+        !Ref DBPassword
 
       Port: 3306
 
-      # -----------------------------------------------------
+
+      # ---------------------------------------------------
       # Storage
-      # -----------------------------------------------------
+      # ---------------------------------------------------
 
       AllocatedStorage: 20
 
@@ -103,9 +148,10 @@ Resources:
 
       StorageEncrypted: true
 
-      # -----------------------------------------------------
+
+      # ---------------------------------------------------
       # Networking
-      # -----------------------------------------------------
+      # ---------------------------------------------------
 
       DBSubnetGroupName:
         !Ref RdsSubnetGroup
@@ -117,45 +163,60 @@ Resources:
 
       PubliclyAccessible: false
 
-      # -----------------------------------------------------
-      # Availability
-      # -----------------------------------------------------
 
-      # Single-AZ database.
-      # The subnet group contains two AZs only because
-      # RDS requires this for the subnet group.
+      # ---------------------------------------------------
+      # SINGLE-AZ
+      # ---------------------------------------------------
+      #
+      # The database itself is NOT Multi-AZ.
+      # The second subnet exists only for the DB subnet
+      # group requirement.
+      # ---------------------------------------------------
 
       MultiAZ: false
 
-      # -----------------------------------------------------
+
+      # ---------------------------------------------------
       # Backup
-      # -----------------------------------------------------
+      # ---------------------------------------------------
 
       BackupRetentionPeriod: 7
 
-      # -----------------------------------------------------
+
+      # ---------------------------------------------------
       # Maintenance
-      # -----------------------------------------------------
+      # ---------------------------------------------------
 
       AutoMinorVersionUpgrade: true
 
-      # -----------------------------------------------------
-      # Monitoring
-      # -----------------------------------------------------
+
+      # ---------------------------------------------------
+      # CloudWatch Logs
+      # ---------------------------------------------------
 
       EnableCloudwatchLogsExports:
+
         - error
         - general
         - slowquery
 
+
+      # ---------------------------------------------------
+      # Tags
+      # ---------------------------------------------------
+
       Tags:
+
         - Key: Name
           Value: !Sub cloudmart-${Environment}-mysql
 
+        - Key: Environment
+          Value: !Ref Environment
 
-  # =========================================================
-  # S3 BUCKET
-  # =========================================================
+
+  # =======================================================
+  # S3 PRODUCT BUCKET
+  # =======================================================
 
   CloudMartProductBucket:
     Type: AWS::S3::Bucket
@@ -165,6 +226,10 @@ Resources:
 
     Properties:
 
+      # ---------------------------------------------------
+      # Encryption
+      # ---------------------------------------------------
+
       BucketEncryption:
 
         ServerSideEncryptionConfiguration:
@@ -172,15 +237,34 @@ Resources:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
 
+
+      # ---------------------------------------------------
+      # Public Access Block
+      # ---------------------------------------------------
+
       PublicAccessBlockConfiguration:
 
         BlockPublicAcls: true
+
         BlockPublicPolicy: true
+
         IgnorePublicAcls: true
+
         RestrictPublicBuckets: true
 
+
+      # ---------------------------------------------------
+      # Versioning
+      # ---------------------------------------------------
+
       VersioningConfiguration:
+
         Status: Enabled
+
+
+      # ---------------------------------------------------
+      # Tags
+      # ---------------------------------------------------
 
       Tags:
 
@@ -191,18 +275,36 @@ Resources:
           Value: !Ref Environment
 
 
-# ===========================================================
+# =========================================================
 # OUTPUTS
-# ===========================================================
+# =========================================================
 
 Outputs:
 
 
-  # =========================================================
+  # =======================================================
+  # RDS INSTANCE ID
+  # =======================================================
+
+  RdsInstanceIdentifier:
+
+    Description:
+      CloudMart RDS MySQL instance identifier
+
+    Value:
+      !Ref CloudMartDatabase
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-RdsInstanceIdentifier
+
+
+  # =======================================================
   # RDS ENDPOINT
-  # =========================================================
+  # =======================================================
 
   RdsEndpoint:
+
     Description:
       CloudMart RDS MySQL endpoint
 
@@ -214,11 +316,12 @@ Outputs:
         !Sub CloudMart-${Environment}-RdsEndpoint
 
 
-  # =========================================================
+  # =======================================================
   # RDS PORT
-  # =========================================================
+  # =======================================================
 
   RdsPort:
+
     Description:
       CloudMart RDS MySQL port
 
@@ -230,13 +333,14 @@ Outputs:
         !Sub CloudMart-${Environment}-RdsPort
 
 
-  # =========================================================
-  # RDS DATABASE NAME
-  # =========================================================
+  # =======================================================
+  # DATABASE NAME
+  # =======================================================
 
   RdsDatabaseName:
+
     Description:
-      CloudMart database name
+      CloudMart MySQL database name
 
     Value:
       !Ref DBName
@@ -246,29 +350,31 @@ Outputs:
         !Sub CloudMart-${Environment}-RdsDatabaseName
 
 
-  # =========================================================
-  # RDS INSTANCE IDENTIFIER
-  # =========================================================
+  # =======================================================
+  # DATABASE USERNAME
+  # =======================================================
 
-  RdsInstanceIdentifier:
+  RdsUsername:
+
     Description:
-      CloudMart RDS instance identifier
+      CloudMart RDS master username
 
     Value:
-      !Ref CloudMartDatabase
+      !Ref DBUsername
 
     Export:
       Name:
-        !Sub CloudMart-${Environment}-RdsInstanceIdentifier
+        !Sub CloudMart-${Environment}-RdsUsername
 
 
-  # =========================================================
-  # S3 BUCKET
-  # =========================================================
+  # =======================================================
+  # S3 PRODUCT BUCKET
+  # =======================================================
 
   ProductBucketName:
+
     Description:
-      CloudMart product S3 bucket
+      CloudMart product S3 bucket name
 
     Value:
       !Ref CloudMartProductBucket
