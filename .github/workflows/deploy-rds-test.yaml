@@ -1,0 +1,237 @@
+name: Deploy RDS Connectivity Test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  ENVIRONMENT: dev
+  STACK_NAME: cloudmart-dev-rds-test
+
+jobs:
+
+  deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # =====================================================
+      # 1. CHECKOUT
+      # =====================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # =====================================================
+      # 2. CONFIGURE AWS
+      # =====================================================
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # =====================================================
+      # 3. VERIFY AWS
+      # =====================================================
+
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+
+      # =====================================================
+      # 4. INSTALL PYMYSQL
+      # =====================================================
+
+      - name: Install PyMySQL
+        run: |
+
+          mkdir -p package
+
+          pip install \
+            -r lambda/rds-test/requirements.txt \
+            -t package
+
+
+      # =====================================================
+      # 5. COPY LAMBDA CODE
+      # =====================================================
+
+      - name: Copy Lambda code
+        run: |
+
+          cp lambda/rds-test/lambda_function.py package/
+
+
+      # =====================================================
+      # 6. CREATE ZIP
+      # =====================================================
+
+      - name: Create Lambda package
+        run: |
+
+          cd package
+
+          zip -r ../lambda.zip .
+
+
+      # =====================================================
+      # 7. GET LAMBDA ARTIFACT BUCKET
+      # =====================================================
+
+      - name: Get Lambda artifacts bucket
+        id: bucket
+
+        run: |
+
+          BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name cloudmart-dev-data \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='LambdaBucket'].OutputValue" \
+            --output text)
+
+          echo "bucket=$BUCKET" >> "$GITHUB_OUTPUT"
+
+          echo "Lambda bucket: $BUCKET"
+
+
+      # =====================================================
+      # 8. UPLOAD LAMBDA PACKAGE
+      # =====================================================
+
+      - name: Upload Lambda package
+        run: |
+
+          aws s3 cp \
+            lambda.zip \
+            "s3://${{ steps.bucket.outputs.bucket }}/rds-test/${STACK_NAME}/lambda.zip" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 9. VALIDATE CLOUDFORMATION
+      # =====================================================
+
+      - name: Validate RDS Test Stack
+        run: |
+
+          aws cloudformation validate-template \
+            --template-body file://cloudformation/Rds-test-stack.yaml \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 10. CHECK STACK
+      # =====================================================
+
+      - name: Check stack
+        id: stack
+
+        run: |
+
+          if aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            > /dev/null 2>&1
+
+          then
+
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+
+          else
+
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+
+          fi
+
+
+      # =====================================================
+      # 11. CREATE STACK
+      # =====================================================
+
+      - name: Create RDS Test Stack
+
+        if: steps.stack.outputs.exists == 'false'
+
+        run: |
+
+          aws cloudformation create-stack \
+            --stack-name "$STACK_NAME" \
+            --template-body file://cloudformation/Rds-test-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 12. WAIT FOR CREATE
+      # =====================================================
+
+      - name: Wait for stack creation
+
+        if: steps.stack.outputs.exists == 'false'
+
+        run: |
+
+          aws cloudformation wait stack-create-complete \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 13. UPDATE EXISTING STACK
+      # =====================================================
+
+      - name: Update RDS Test Stack
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          aws cloudformation update-stack \
+            --stack-name "$STACK_NAME" \
+            --template-body file://cloudformation/Rds-test-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 14. WAIT FOR UPDATE
+      # =====================================================
+
+      - name: Wait for stack update
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          aws cloudformation wait stack-update-complete \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 15. DISPLAY OUTPUTS
+      # =====================================================
+
+      - name: Display outputs
+
+        run: |
+
+          aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs"
