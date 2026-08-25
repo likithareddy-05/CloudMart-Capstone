@@ -2,8 +2,10 @@ AWSTemplateFormatVersion: '2010-09-09'
 
 Description: >
   CloudMart Network Stack.
-  Creates VPC, public/private subnets,
-  route tables, security groups and VPC endpoints.
+  Creates the VPC, public and private subnets,
+  Internet Gateway, route tables, security groups,
+  and VPC interface endpoints required by
+  Lambda, SSM Parameter Store, and CloudWatch Logs.
 
 Parameters:
 
@@ -15,6 +17,9 @@ Parameters:
       - dev
       - test
       - prod
+
+    Description: Deployment environment
+
 
 Resources:
 
@@ -49,6 +54,8 @@ Resources:
           Value: !Sub cloudmart-${Environment}-igw
 
 
+  # Attach Internet Gateway to VPC
+
   AttachInternetGateway:
     Type: AWS::EC2::VPCGatewayAttachment
 
@@ -60,6 +67,8 @@ Resources:
   # =========================================================
   # PUBLIC SUBNET
   # =========================================================
+
+  # Single Availability Zone design
 
   PublicSubnet:
     Type: AWS::EC2::Subnet
@@ -84,6 +93,8 @@ Resources:
   # =========================================================
   # PRIVATE SUBNET
   # =========================================================
+
+  # Single Availability Zone design
 
   PrivateSubnet:
     Type: AWS::EC2::Subnet
@@ -120,6 +131,8 @@ Resources:
           Value: !Sub cloudmart-${Environment}-public-rt
 
 
+  # Internet route for public subnet
+
   PublicRoute:
     Type: AWS::EC2::Route
 
@@ -136,6 +149,8 @@ Resources:
       GatewayId:
         !Ref InternetGateway
 
+
+  # Associate public subnet with public route table
 
   PublicSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
@@ -163,6 +178,8 @@ Resources:
           Value: !Sub cloudmart-${Environment}-private-rt
 
 
+  # Associate private subnet with private route table
+
   PrivateSubnetRouteTableAssociation:
     Type: AWS::EC2::SubnetRouteTableAssociation
 
@@ -185,13 +202,14 @@ Resources:
 
       GroupDescription:
         Allow Lambda functions to communicate with
-        internal resources and AWS VPC endpoints.
+        RDS and AWS VPC interface endpoints.
 
       VpcId:
         !Ref CloudMartVPC
 
       SecurityGroupEgress:
 
+        # HTTPS access to AWS services
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
@@ -203,8 +221,52 @@ Resources:
 
 
   # =========================================================
+  # VPC ENDPOINT SECURITY GROUP
+  # =========================================================
+
+  # Separate security group for interface endpoints.
+  #
+  # Lambda SG -> TCP 443 -> VPC Endpoint SG
+  #
+  # This is required for SSM and CloudWatch Logs
+  # interface endpoints.
+
+  VpcEndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+
+    Properties:
+
+      GroupDescription:
+        Allow HTTPS traffic from Lambda functions
+        to VPC interface endpoints.
+
+      VpcId:
+        !Ref CloudMartVPC
+
+      SecurityGroupIngress:
+
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId:
+            !Ref LambdaSecurityGroup
+
+      SecurityGroupEgress:
+
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+      Tags:
+        - Key: Name
+          Value: !Sub cloudmart-${Environment}-vpce-sg
+
+
+  # =========================================================
   # RDS SECURITY GROUP
   # =========================================================
+
+  # Only Lambda functions using LambdaSecurityGroup
+  # can connect to MySQL on port 3306.
 
   RdsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -239,6 +301,10 @@ Resources:
   # SSM VPC INTERFACE ENDPOINT
   # =========================================================
 
+  # Allows private Lambda functions to access
+  # Systems Manager Parameter Store without
+  # requiring public internet access.
+
   SsmVpcEndpoint:
     Type: AWS::EC2::VPCEndpoint
 
@@ -250,17 +316,15 @@ Resources:
       ServiceName:
         !Sub com.amazonaws.${AWS::Region}.ssm
 
-      VpcEndpointType:
-        Interface
+      VpcEndpointType: Interface
 
-      PrivateDnsEnabled:
-        true
+      PrivateDnsEnabled: true
 
       SubnetIds:
         - !Ref PrivateSubnet
 
       SecurityGroupIds:
-        - !Ref LambdaSecurityGroup
+        - !Ref VpcEndpointSecurityGroup
 
       Tags:
         - Key: Name
@@ -270,6 +334,9 @@ Resources:
   # =========================================================
   # CLOUDWATCH LOGS VPC INTERFACE ENDPOINT
   # =========================================================
+
+  # Allows Lambda functions inside the private subnet
+  # to send logs to CloudWatch Logs.
 
   CloudWatchLogsVpcEndpoint:
     Type: AWS::EC2::VPCEndpoint
@@ -282,31 +349,35 @@ Resources:
       ServiceName:
         !Sub com.amazonaws.${AWS::Region}.logs
 
-      VpcEndpointType:
-        Interface
+      VpcEndpointType: Interface
 
-      PrivateDnsEnabled:
-        true
+      PrivateDnsEnabled: true
 
       SubnetIds:
         - !Ref PrivateSubnet
 
       SecurityGroupIds:
-        - !Ref LambdaSecurityGroup
+        - !Ref VpcEndpointSecurityGroup
 
       Tags:
         - Key: Name
           Value: !Sub cloudmart-${Environment}-logs-endpoint
 
 
+# ===========================================================
+# OUTPUTS
+# ===========================================================
+
 Outputs:
 
+
   # =========================================================
-  # VPC
+  # VPC ID
   # =========================================================
 
   VpcId:
-    Description: CloudMart VPC ID
+    Description:
+      CloudMart VPC ID
 
     Value:
       !Ref CloudMartVPC
@@ -317,11 +388,12 @@ Outputs:
 
 
   # =========================================================
-  # PUBLIC SUBNET
+  # PUBLIC SUBNET ID
   # =========================================================
 
   PublicSubnetId:
-    Description: CloudMart public subnet ID
+    Description:
+      CloudMart public subnet ID
 
     Value:
       !Ref PublicSubnet
@@ -332,11 +404,12 @@ Outputs:
 
 
   # =========================================================
-  # PRIVATE SUBNET
+  # PRIVATE SUBNET ID
   # =========================================================
 
   PrivateSubnetId:
-    Description: CloudMart private subnet ID
+    Description:
+      CloudMart private subnet ID
 
     Value:
       !Ref PrivateSubnet
@@ -347,11 +420,12 @@ Outputs:
 
 
   # =========================================================
-  # LAMBDA SECURITY GROUP
+  # LAMBDA SECURITY GROUP ID
   # =========================================================
 
   LambdaSecurityGroupId:
-    Description: Security group used by Lambda functions
+    Description:
+      Security group used by CloudMart Lambda functions
 
     Value:
       !Ref LambdaSecurityGroup
@@ -362,11 +436,12 @@ Outputs:
 
 
   # =========================================================
-  # RDS SECURITY GROUP
+  # RDS SECURITY GROUP ID
   # =========================================================
 
   RdsSecurityGroupId:
-    Description: Security group used by RDS
+    Description:
+      Security group used by CloudMart RDS MySQL
 
     Value:
       !Ref RdsSecurityGroup
@@ -377,11 +452,28 @@ Outputs:
 
 
   # =========================================================
-  # SSM VPC ENDPOINT
+  # VPC ENDPOINT SECURITY GROUP ID
+  # =========================================================
+
+  VpcEndpointSecurityGroupId:
+    Description:
+      Security group used by CloudMart interface VPC endpoints
+
+    Value:
+      !Ref VpcEndpointSecurityGroup
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-VpcEndpointSecurityGroupId
+
+
+  # =========================================================
+  # SSM VPC ENDPOINT ID
   # =========================================================
 
   SsmVpcEndpointId:
-    Description: SSM VPC Interface Endpoint
+    Description:
+      SSM Parameter Store VPC interface endpoint
 
     Value:
       !Ref SsmVpcEndpoint
@@ -389,3 +481,19 @@ Outputs:
     Export:
       Name:
         !Sub CloudMart-${Environment}-SsmVpcEndpointId
+
+
+  # =========================================================
+  # CLOUDWATCH LOGS VPC ENDPOINT ID
+  # =========================================================
+
+  CloudWatchLogsVpcEndpointId:
+    Description:
+      CloudWatch Logs VPC interface endpoint
+
+    Value:
+      !Ref CloudWatchLogsVpcEndpoint
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-CloudWatchLogsVpcEndpointId
