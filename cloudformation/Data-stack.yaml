@@ -1,15 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 
-Description: >
-  CloudMart Data Stack.
-  Creates the RDS MySQL database and S3 bucket.
-  RDS is deployed as Single-AZ. A second private subnet
-  is used only because AWS requires an RDS DB subnet group
-  to span at least two Availability Zones.
-
-# =========================================================
-# PARAMETERS
-# =========================================================
+Description: CloudMart Data Stack
 
 Parameters:
 
@@ -22,405 +13,174 @@ Parameters:
       - test
       - prod
 
-    Description: Deployment environment
-
-
   DBName:
     Type: String
     Default: cloudmart
-
-    Description: CloudMart MySQL database name
-
 
   DBUsername:
     Type: String
     Default: cloudmartadmin
 
-    Description: RDS master username
-
-
   DBPassword:
     Type: String
     NoEcho: true
 
-    MinLength: 8
-    MaxLength: 41
-
-    Description: >
-      RDS master password supplied securely through
-      the GitHub Actions deployment workflow.
-
-
-# =========================================================
-# RESOURCES
-# =========================================================
-
 Resources:
 
-
   # =======================================================
-  # RDS DB SUBNET GROUP
-  # =======================================================
-  #
-  # AWS requires an RDS DB subnet group to contain
-  # subnets in at least two Availability Zones.
-  #
-  # This does NOT make the RDS instance Multi-AZ.
-  #
-  # The actual RDS instance remains Single-AZ
-  # because MultiAZ is set to false below.
+  # RDS SUBNET GROUP
   # =======================================================
 
   RdsSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
 
     Properties:
-
-      DBSubnetGroupDescription:
-        CloudMart RDS MySQL private subnet group
+      DBSubnetGroupDescription: CloudMart DB Subnet Group
 
       SubnetIds:
-
-        # -------------------------------------------------
-        # Primary private subnet
-        # -------------------------------------------------
 
         - Fn::ImportValue:
             !Sub CloudMart-${Environment}-PrivateSubnetId
 
-        # -------------------------------------------------
-        # Second private subnet in another AZ.
-        # Used only to satisfy the RDS subnet group
-        # requirement.
-        # -------------------------------------------------
-
         - Fn::ImportValue:
             !Sub CloudMart-${Environment}-RdsSupportPrivateSubnetId
 
-      Tags:
-
-        - Key: Name
-          Value: !Sub cloudmart-${Environment}-rds-subnet-group
-
-        - Key: Environment
-          Value: !Ref Environment
-
-
   # =======================================================
-  # RDS MYSQL DATABASE
+  # RDS DATABASE
   # =======================================================
 
   CloudMartDatabase:
     Type: AWS::RDS::DBInstance
 
-    # -----------------------------------------------------
-    # If the stack is deleted, CloudFormation attempts
-    # to create a final snapshot.
-    # -----------------------------------------------------
-
-    DeletionPolicy: Snapshot
-
-    UpdateReplacePolicy: Snapshot
-
     Properties:
 
-
-      # ===================================================
-      # DATABASE ENGINE
-      # ===================================================
+      DBInstanceIdentifier: !Sub cloudmart-${Environment}-db
 
       Engine: mysql
 
-      EngineVersion: '8.0'
-
-
-      # ===================================================
-      # INSTANCE CLASS
-      # ===================================================
-
-      # Free Tier-compatible small instance for the
-      # CloudMart development environment.
+      # Recommended to remove EngineVersion
+      # unless you know the exact supported version
+      # EngineVersion: "8.0"
 
       DBInstanceClass: db.t3.micro
-
-
-      # ===================================================
-      # DATABASE CONFIGURATION
-      # ===================================================
-
-      DBName:
-        !Ref DBName
-
-      MasterUsername:
-        !Ref DBUsername
-
-      MasterUserPassword:
-        !Ref DBPassword
-
-      Port: 3306
-
-
-      # ===================================================
-      # STORAGE
-      # ===================================================
 
       AllocatedStorage: 20
 
       StorageType: gp3
 
+      MultiAZ: false
 
-      # ===================================================
-      # STORAGE ENCRYPTION
-      # ===================================================
-      #
-      # Disabled for the current Free Tier configuration.
-      # ===================================================
+      PubliclyAccessible: false
 
-      StorageEncrypted: false
+      StorageEncrypted: true
 
+      DBName: !Ref DBName
 
-      # ===================================================
-      # NETWORKING
-      # ===================================================
+      MasterUsername: !Ref DBUsername
 
-      DBSubnetGroupName:
-        !Ref RdsSubnetGroup
+      MasterUserPassword: !Ref DBPassword
 
       VPCSecurityGroups:
 
         - Fn::ImportValue:
             !Sub CloudMart-${Environment}-RdsSecurityGroupId
 
-      # RDS must remain private.
-      # It must not receive a public IP address.
+      DBSubnetGroupName:
+        !Ref RdsSubnetGroup
 
-      PubliclyAccessible: false
-
-
-      # ===================================================
-      # SINGLE-AZ DEPLOYMENT
-      # ===================================================
-      #
-      # The RDS instance itself is Single-AZ.
-      #
-      # The second subnet exists only because the
-      # DB subnet group requires subnets in multiple AZs.
-      # ===================================================
-
-      MultiAZ: false
-
-
-      # ===================================================
-      # AUTOMATED BACKUP RETENTION
-      # ===================================================
-      #
-      # Free Tier project configuration.
-      # ===================================================
+      DeletionProtection: false
 
       BackupRetentionPeriod: 7
 
-
-      # ===================================================
-      # MAINTENANCE
-      # ===================================================
-
-      AutoMinorVersionUpgrade: true
-
-
-      # ===================================================
-      # CLOUDWATCH LOG EXPORTS
-      # ===================================================
-
-      EnableCloudwatchLogsExports:
-
-        - error
-        - general
-        - slowquery
-
-
-      # ===================================================
-      # TAGS
-      # ===================================================
-
-      Tags:
-
-        - Key: Name
-          Value: !Sub cloudmart-${Environment}-mysql
-
-        - Key: Environment
-          Value: !Ref Environment
-
-
   # =======================================================
-  # S3 PRODUCT BUCKET
+  # DYNAMODB
   # =======================================================
 
-  CloudMartProductBucket:
-    Type: AWS::S3::Bucket
-
-    # Keep the bucket if the CloudFormation stack is deleted.
-
-    DeletionPolicy: Retain
-
-    UpdateReplacePolicy: Retain
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
 
     Properties:
 
+      TableName:
+        !Sub CloudMartOrders-${Environment}
 
-      # ===================================================
-      # SERVER-SIDE ENCRYPTION
-      # ===================================================
+      BillingMode: PAY_PER_REQUEST
 
-      BucketEncryption:
+      AttributeDefinitions:
 
-        ServerSideEncryptionConfiguration:
+        - AttributeName: OrderId
+          AttributeType: S
 
-          - ServerSideEncryptionByDefault:
+        - AttributeName: CustomerId
+          AttributeType: S
 
-              SSEAlgorithm: AES256
+      KeySchema:
 
+        - AttributeName: OrderId
+          KeyType: HASH
 
-      # ===================================================
-      # BLOCK PUBLIC ACCESS
-      # ===================================================
+      GlobalSecondaryIndexes:
 
-      PublicAccessBlockConfiguration:
+        - IndexName: CustomerIndex
 
-        BlockPublicAcls: true
+          KeySchema:
 
-        BlockPublicPolicy: true
+            - AttributeName: CustomerId
+              KeyType: HASH
 
-        IgnorePublicAcls: true
+          Projection:
+            ProjectionType: ALL
 
-        RestrictPublicBuckets: true
+  # =======================================================
+  # LAMBDA ARTIFACTS BUCKET
+  # =======================================================
 
+  LambdaArtifactsBucket:
+    Type: AWS::S3::Bucket
 
-      # ===================================================
-      # VERSIONING
-      # ===================================================
+    Properties:
 
-      VersioningConfiguration:
+      BucketName:
+        !Sub cloudmart-${Environment}-lambda-${AWS::AccountId}
 
-        Status: Enabled
+  # =======================================================
+  # REPORTS BUCKET
+  # =======================================================
 
+  ReportsBucket:
+    Type: AWS::S3::Bucket
 
-      # ===================================================
-      # TAGS
-      # ===================================================
+    Properties:
 
-      Tags:
-
-        - Key: Name
-          Value: !Sub cloudmart-${Environment}-product-bucket
-
-        - Key: Environment
-          Value: !Ref Environment
-
-
-# =========================================================
-# OUTPUTS
-# =========================================================
+      BucketName:
+        !Sub cloudmart-${Environment}-reports-${AWS::AccountId}
 
 Outputs:
 
-
-  # =======================================================
-  # RDS INSTANCE IDENTIFIER
-  # =======================================================
-
-  RdsInstanceIdentifier:
-
-    Description:
-      CloudMart RDS MySQL instance identifier
-
-    Value:
-      !Ref CloudMartDatabase
-
-    Export:
-      Name:
-        !Sub CloudMart-${Environment}-RdsInstanceIdentifier
-
-
-  # =======================================================
-  # RDS ENDPOINT
-  # =======================================================
-
   RdsEndpoint:
 
-    Description:
-      CloudMart RDS MySQL endpoint
+    Description: CloudMart RDS Endpoint
 
     Value:
       !GetAtt CloudMartDatabase.Endpoint.Address
 
-    Export:
-      Name:
-        !Sub CloudMart-${Environment}-RdsEndpoint
+  DynamoDBTable:
 
-
-  # =======================================================
-  # RDS PORT
-  # =======================================================
-
-  RdsPort:
-
-    Description:
-      CloudMart RDS MySQL port
+    Description: Orders DynamoDB Table
 
     Value:
-      !GetAtt CloudMartDatabase.Endpoint.Port
+      !Ref OrdersTable
 
-    Export:
-      Name:
-        !Sub CloudMart-${Environment}-RdsPort
+  LambdaBucket:
 
-
-  # =======================================================
-  # DATABASE NAME
-  # =======================================================
-
-  RdsDatabaseName:
-
-    Description:
-      CloudMart MySQL database name
+    Description: Lambda Artifacts Bucket
 
     Value:
-      !Ref DBName
+      !Ref LambdaArtifactsBucket
 
-    Export:
-      Name:
-        !Sub CloudMart-${Environment}-RdsDatabaseName
+  ReportsBucketName:
 
-
-  # =======================================================
-  # DATABASE USERNAME
-  # =======================================================
-
-  RdsUsername:
-
-    Description:
-      CloudMart RDS master username
+    Description: Reports Bucket
 
     Value:
-      !Ref DBUsername
-
-    Export:
-      Name:
-        !Sub CloudMart-${Environment}-RdsUsername
-
-
-  # =======================================================
-  # S3 PRODUCT BUCKET
-  # =======================================================
-
-  ProductBucketName:
-
-    Description:
-      CloudMart product S3 bucket name
-
-    Value:
-      !Ref CloudMartProductBucket
-
-    Export:
-      Name:
-        !Sub CloudMart-${Environment}-ProductBucketName
+      !Ref ReportsBucket
