@@ -306,6 +306,10 @@ Outputs:
     Value:
       !Ref LambdaArtifactsBucket
 
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-LambdaBucketName
+
 
   # =======================================================
   # REPORTS BUCKET

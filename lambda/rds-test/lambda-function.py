@@ -11,6 +11,8 @@ def lambda_handler(event, context):
     username = os.environ["DB_USERNAME"]
     password = os.environ["DB_PASSWORD"]
 
+    connection = None
+
     try:
 
         connection = pymysql.connect(
@@ -28,8 +30,6 @@ def lambda_handler(event, context):
 
             result = cursor.fetchone()
 
-        connection.close()
-
         print(json.dumps({
             "message": "RDS connection successful",
             "query_result": result[0]
@@ -43,17 +43,22 @@ def lambda_handler(event, context):
             })
         }
 
-    except Exception as e:
+    except Exception as error:
 
         print(json.dumps({
             "message": "RDS connection failed",
-            "error": str(e)
+            "error": str(error)
         }))
 
         return {
             "statusCode": 500,
             "body": json.dumps({
                 "message": "RDS connection failed",
-                "error": str(e)
+                "error": str(error)
             })
         }
+
+    finally:
+
+        if connection:
+            connection.close()
