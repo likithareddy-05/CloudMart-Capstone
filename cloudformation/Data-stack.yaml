@@ -128,10 +128,6 @@ Resources:
       # ---------------------------------------------------
       # STORAGE ENCRYPTION
       # ---------------------------------------------------
-      #
-      # Keep the same setting as your successfully
-      # deployed configuration.
-      # ---------------------------------------------------
 
       StorageEncrypted: true
 
@@ -193,11 +189,11 @@ Resources:
 
 
       # ---------------------------------------------------
-      # AUTOMATED BACKUP RETENTION
+      # AUTOMATED BACKUP
       # ---------------------------------------------------
       #
-      # This is the value from the configuration that
-      # successfully deployed in your account.
+      # BackupRetentionPeriod = 0 because your AWS account
+      # is using the Free Tier configuration.
       # ---------------------------------------------------
 
       BackupRetentionPeriod: 0
@@ -207,7 +203,7 @@ Resources:
   # LAMBDA ARTIFACTS S3 BUCKET
   # =======================================================
   #
-  # Stores Lambda deployment artifacts/packages.
+  # Stores Lambda deployment packages.
   # =======================================================
 
   LambdaArtifactsBucket:
@@ -221,9 +217,6 @@ Resources:
 
   # =======================================================
   # REPORTS S3 BUCKET
-  # =======================================================
-  #
-  # Stores CloudMart reports.
   # =======================================================
 
   ReportsBucket:
@@ -295,7 +288,7 @@ Outputs:
 
 
   # =======================================================
-  # LAMBDA ARTIFACTS BUCKET
+  # LAMBDA ARTIFACTS S3 BUCKET
   # =======================================================
 
   LambdaBucket:
@@ -308,11 +301,11 @@ Outputs:
 
     Export:
       Name:
-        !Sub CloudMart-${Environment}-LambdaBucketName
+        !Sub CloudMart-${Environment}-LambdaBucket
 
 
   # =======================================================
-  # REPORTS BUCKET
+  # REPORTS S3 BUCKET
   # =======================================================
 
   ReportsBucketName:
