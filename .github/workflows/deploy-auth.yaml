@@ -1,0 +1,215 @@
+name: Deploy Auth Stack
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  ENVIRONMENT: dev
+  STACK_NAME: cloudmart-dev-auth
+
+jobs:
+
+  deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # =====================================================
+      # 1. CHECKOUT
+      # =====================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # =====================================================
+      # 2. AWS CREDENTIALS
+      # =====================================================
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # =====================================================
+      # 3. VERIFY AWS
+      # =====================================================
+
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+
+      # =====================================================
+      # 4. CREATE AUTHORIZE ZIP
+      # =====================================================
+
+      - name: Create Authorizer package
+        run: |
+
+          cd lambda/authorizer
+
+          zip -j authorizer.zip lambda_function.py
+
+
+      # =====================================================
+      # 5. GET LAMBDA ARTIFACT BUCKET
+      # =====================================================
+
+      - name: Get Lambda artifacts bucket
+        id: bucket
+
+        run: |
+
+          BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name cloudmart-dev-data \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='LambdaBucket'].OutputValue" \
+            --output text)
+
+          echo "bucket=$BUCKET" >> "$GITHUB_OUTPUT"
+
+          echo "Lambda artifact bucket: $BUCKET"
+
+
+      # =====================================================
+      # 6. UPLOAD AUTHORIZE ZIP
+      # =====================================================
+
+      - name: Upload Authorizer package
+        run: |
+
+          aws s3 cp \
+            lambda/authorizer/authorizer.zip \
+            "s3://${{ steps.bucket.outputs.bucket }}/authorizer/authorizer.zip" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 7. VALIDATE TEMPLATE
+      # =====================================================
+
+      - name: Validate Auth Stack
+        run: |
+
+          aws cloudformation validate-template \
+            --template-body file://cloudformation/Auth-stack.yaml \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 8. CHECK STACK
+      # =====================================================
+
+      - name: Check Auth Stack
+        id: stack
+
+        run: |
+
+          if aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            > /dev/null 2>&1
+
+          then
+
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+
+          else
+
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+
+          fi
+
+
+      # =====================================================
+      # 9. CREATE STACK
+      # =====================================================
+
+      - name: Create Auth Stack
+
+        if: steps.stack.outputs.exists == 'false'
+
+        run: |
+
+          aws cloudformation create-stack \
+            --stack-name "$STACK_NAME" \
+            --template-body file://cloudformation/Auth-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+              ParameterKey=TokenParameterName,ParameterValue="/cloudmart/dev/auth/token" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 10. WAIT FOR CREATE
+      # =====================================================
+
+      - name: Wait for Auth Stack creation
+
+        if: steps.stack.outputs.exists == 'false'
+
+        run: |
+
+          aws cloudformation wait stack-create-complete \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 11. UPDATE EXISTING STACK
+      # =====================================================
+
+      - name: Update Auth Stack
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          aws cloudformation update-stack \
+            --stack-name "$STACK_NAME" \
+            --template-body file://cloudformation/Auth-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+              ParameterKey=TokenParameterName,ParameterValue="/cloudmart/dev/auth/token" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 12. WAIT FOR UPDATE
+      # =====================================================
+
+      - name: Wait for Auth Stack update
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          aws cloudformation wait stack-update-complete \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 13. DISPLAY OUTPUTS
+      # =====================================================
+
+      - name: Display Auth Stack outputs
+
+        run: |
+
+          aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs"
