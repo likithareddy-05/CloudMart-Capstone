@@ -6,6 +6,7 @@ Description: >
   The expected authentication token is stored in
   AWS Systems Manager Parameter Store as a SecureString.
 
+
 # =========================================================
 # PARAMETERS
 # =========================================================
@@ -31,6 +32,15 @@ Parameters:
     Description: >
       SSM Parameter Store path containing the
       CloudMart authentication token.
+
+
+  LambdaS3Key:
+    Type: String
+    Default: authorizer/authorizer.zip
+
+    Description: >
+      S3 key containing the Authorizer Lambda
+      deployment package.
 
 
 # =========================================================
@@ -71,7 +81,7 @@ Resources:
       Policies:
 
         # -------------------------------------------------
-        # CloudWatch Logs
+        # CLOUDWATCH LOGS
         # -------------------------------------------------
 
         - PolicyName:
@@ -96,7 +106,7 @@ Resources:
 
 
         # -------------------------------------------------
-        # SSM Token Access
+        # SSM TOKEN ACCESS
         # -------------------------------------------------
 
         - PolicyName:
@@ -154,8 +164,9 @@ Resources:
           Fn::ImportValue:
             !Sub CloudMart-${Environment}-LambdaBucket
 
+        # Versioned S3 object supplied by GitHub Actions
         S3Key:
-          authorizer/authorizer-${Version}.zip
+          !Ref LambdaS3Key
 
 
   # =======================================================
@@ -188,7 +199,7 @@ Outputs:
 
 
   # =======================================================
-  # AUTHORIZE LAMBDA ARN
+  # AUTHORIZER LAMBDA ARN
   # =======================================================
 
   AuthorizerLambdaArn:
@@ -205,13 +216,13 @@ Outputs:
 
 
   # =======================================================
-  # AUTHORIZE LAMBDA NAME
+  # AUTHORIZER LAMBDA NAME
   # =======================================================
 
   AuthorizerLambdaName:
 
     Description:
-      CloudMart Lambda Authorizer name
+      CloudMart Authorizer Lambda name
 
     Value:
       !Ref AuthorizerLambda
@@ -222,7 +233,7 @@ Outputs:
 
 
   # =======================================================
-  # AUTHORIZE ROLE ARN
+  # AUTHORIZER ROLE ARN
   # =======================================================
 
   AuthorizerRoleArn:
