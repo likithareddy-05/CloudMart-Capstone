@@ -90,7 +90,7 @@ jobs:
           LAMBDA_SG=$(aws cloudformation describe-stacks \
             --stack-name "$NETWORK_STACK" \
             --region "$AWS_REGION" \
-            --query "Stacks[0].Outputs[?OutputKey=='LambdaSecurityGroup'].OutputValue" \
+            --query "Stacks[0].Outputs[?OutputKey=='LambdaSecurityGroupId'].OutputValue" \
             --output text)
 
           echo "VPC_ID=$VPC_ID"
