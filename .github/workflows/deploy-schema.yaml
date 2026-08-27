@@ -8,16 +8,19 @@ permissions:
   contents: read
 
 env:
-
   AWS_REGION: ap-south-1
-
   ENVIRONMENT: dev
 
+  # CloudFormation stacks
+  NETWORK_STACK: cloudmart-dev-network
+  DATA_STACK: cloudmart-dev-data
   STACK_NAME: cloudmart-dev-schema
 
-  NETWORK_STACK: cloudmart-dev-network
+  # Existing Lambda bucket
+  LAMBDA_BUCKET: cloudmart-dev-lambda-430155298316
 
-  DATA_STACK: cloudmart-dev-data
+  # Schema Runner Lambda
+  FUNCTION_NAME: CloudMart-dev-SchemaRunner
 
 
 jobs:
@@ -28,9 +31,8 @@ jobs:
 
     steps:
 
-
       # =====================================================
-      # 1. CHECKOUT
+      # 1. CHECKOUT REPOSITORY
       # =====================================================
 
       - name: Checkout repository
@@ -39,7 +41,7 @@ jobs:
 
 
       # =====================================================
-      # 2. AWS CREDENTIALS
+      # 2. CONFIGURE AWS CREDENTIALS
       # =====================================================
 
       - name: Configure AWS credentials
@@ -54,32 +56,92 @@ jobs:
 
 
       # =====================================================
-      # 3. VERIFY AWS
+      # 3. VERIFY AWS IDENTITY
       # =====================================================
 
       - name: Verify AWS identity
 
         run: |
 
+          echo "Checking AWS identity..."
+
           aws sts get-caller-identity
 
 
       # =====================================================
-      # 4. GET LAMBDA BUCKET
+      # 4. VERIFY NETWORK STACK
+      # =====================================================
+
+      - name: Verify Network Stack
+
+        run: |
+
+          echo "Checking Network Stack..."
+
+          NETWORK_STATUS=$(aws cloudformation describe-stacks \
+            --stack-name "$NETWORK_STACK" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].StackStatus" \
+            --output text)
+
+          echo "Network Stack Status: $NETWORK_STATUS"
+
+          if [ "$NETWORK_STATUS" != "CREATE_COMPLETE" ] && \
+             [ "$NETWORK_STATUS" != "UPDATE_COMPLETE" ]; then
+
+            echo "ERROR: Network Stack is not ready."
+
+            exit 1
+
+          fi
+
+
+      # =====================================================
+      # 5. VERIFY DATA STACK
+      # =====================================================
+
+      - name: Verify Data Stack
+
+        run: |
+
+          echo "Checking Data Stack..."
+
+          DATA_STATUS=$(aws cloudformation describe-stacks \
+            --stack-name "$DATA_STACK" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].StackStatus" \
+            --output text)
+
+          echo "Data Stack Status: $DATA_STATUS"
+
+          if [ "$DATA_STATUS" != "CREATE_COMPLETE" ] && \
+             [ "$DATA_STATUS" != "UPDATE_COMPLETE" ]; then
+
+            echo "ERROR: Data Stack is not ready."
+
+            exit 1
+
+          fi
+
+
+      # =====================================================
+      # 6. SET LAMBDA BUCKET
       # =====================================================
 
       - name: Get Lambda bucket
 
         run: |
 
-          LAMBDA_BUCKET=$(aws cloudformation list-exports \
-            --region "$AWS_REGION" \
-            --query "Exports[?Name=='CloudMart-${ENVIRONMENT}-LambdaBucket'].Value" \
-            --output text)
+          LAMBDA_BUCKET="cloudmart-dev-lambda-430155298316"
 
-          echo "Lambda bucket: $LAMBDA_BUCKET"
+          echo "========================================"
 
-          if [ -z "$LAMBDA_BUCKET" ] || [ "$LAMBDA_BUCKET" = "None" ]; then
+          echo "Lambda bucket: [$LAMBDA_BUCKET]"
+
+          echo "========================================"
+
+
+          if [ -z "$LAMBDA_BUCKET" ]; then
 
             echo "ERROR: Lambda bucket not found."
 
@@ -87,18 +149,122 @@ jobs:
 
           fi
 
+
           echo "LAMBDA_BUCKET=$LAMBDA_BUCKET" >> "$GITHUB_ENV"
 
 
       # =====================================================
-      # 5. CREATE LAMBDA PACKAGE
+      # 7. VERIFY LAMBDA BUCKET
+      # =====================================================
+
+      - name: Verify Lambda bucket
+
+        run: |
+
+          echo "Checking S3 bucket..."
+
+          aws s3api head-bucket \
+            --bucket "$LAMBDA_BUCKET" \
+            --region "$AWS_REGION"
+
+          echo "Lambda bucket exists."
+
+
+      # =====================================================
+      # 8. VERIFY NETWORK EXPORTS
+      # =====================================================
+
+      - name: Get Network configuration
+
+        run: |
+
+          echo "Getting VPC configuration..."
+
+          PRIVATE_SUBNET=$(aws cloudformation list-exports \
+            --region "$AWS_REGION" \
+            --query "Exports[?Name=='CloudMart-dev-PrivateSubnetId'].Value" \
+            --output text)
+
+          LAMBDA_SG=$(aws cloudformation list-exports \
+            --region "$AWS_REGION" \
+            --query "Exports[?Name=='CloudMart-dev-LambdaSecurityGroupId'].Value" \
+            --output text)
+
+          VPC_ID=$(aws cloudformation list-exports \
+            --region "$AWS_REGION" \
+            --query "Exports[?Name=='CloudMart-dev-VpcId'].Value" \
+            --output text)
+
+
+          echo "========================================"
+
+          echo "VPC ID:         [$VPC_ID]"
+
+          echo "Private Subnet: [$PRIVATE_SUBNET]"
+
+          echo "Lambda SG:      [$LAMBDA_SG]"
+
+          echo "========================================"
+
+
+          # -------------------------------------------------
+          # Validate VPC
+          # -------------------------------------------------
+
+          if [[ ! "$VPC_ID" =~ ^vpc-[0-9a-zA-Z]+$ ]]; then
+
+            echo "ERROR: Invalid VPC ID: [$VPC_ID]"
+
+            exit 1
+
+          fi
+
+
+          # -------------------------------------------------
+          # Validate subnet
+          # -------------------------------------------------
+
+          if [[ ! "$PRIVATE_SUBNET" =~ ^subnet-[0-9a-zA-Z]+$ ]]; then
+
+            echo "ERROR: Invalid private subnet ID: [$PRIVATE_SUBNET]"
+
+            exit 1
+
+          fi
+
+
+          # -------------------------------------------------
+          # Validate security group
+          # -------------------------------------------------
+
+          if [[ ! "$LAMBDA_SG" =~ ^sg-[0-9a-zA-Z]+$ ]]; then
+
+            echo "ERROR: Invalid Lambda security group ID: [$LAMBDA_SG]"
+
+            exit 1
+
+          fi
+
+
+          echo "Network configuration verified successfully."
+
+
+          echo "VPC_ID=$VPC_ID" >> "$GITHUB_ENV"
+
+          echo "PRIVATE_SUBNET=$PRIVATE_SUBNET" >> "$GITHUB_ENV"
+
+          echo "LAMBDA_SG=$LAMBDA_SG" >> "$GITHUB_ENV"
+
+
+      # =====================================================
+      # 9. CREATE LAMBDA PACKAGE
       # =====================================================
 
       - name: Create Schema Lambda package
 
         run: |
 
-          echo "Creating Lambda package..."
+          echo "Creating Schema Lambda package..."
 
           rm -rf package
 
@@ -107,24 +273,32 @@ jobs:
           mkdir package
 
 
+          # -------------------------------------------------
           # Install PyMySQL
+          # -------------------------------------------------
 
           python -m pip install \
             PyMySQL \
             --target package
 
 
-          # Copy Lambda code
+          # -------------------------------------------------
+          # Copy Lambda function
+          # -------------------------------------------------
 
           cp lambda/schema-runner/lambda_function.py package/
 
 
-          # Copy schema
+          # -------------------------------------------------
+          # Copy SQL schema
+          # -------------------------------------------------
 
           cp database/schema.sql package/
 
 
+          # -------------------------------------------------
           # Create ZIP
+          # -------------------------------------------------
 
           cd package
 
@@ -134,25 +308,44 @@ jobs:
 
 
       # =====================================================
-      # 6. VERIFY ZIP
+      # 10. VERIFY ZIP
       # =====================================================
 
-      - name: Verify package
+      - name: Verify Schema Lambda package
 
         run: |
 
-          echo "Schema package contents:"
+          echo "========================================"
+
+          echo "Schema Lambda package contents"
+
+          echo "========================================"
 
           unzip -l schema-runner.zip
 
 
+          echo "Checking lambda_function.py..."
+
+          unzip -l schema-runner.zip | grep "lambda_function.py"
+
+
+          echo "Checking schema.sql..."
+
+          unzip -l schema-runner.zip | grep "schema.sql"
+
+
+          echo "Package verification successful."
+
+
       # =====================================================
-      # 7. UPLOAD ZIP TO S3
+      # 11. UPLOAD PACKAGE TO S3
       # =====================================================
 
       - name: Upload Schema Lambda package
 
         run: |
+
+          echo "Uploading Schema Lambda package..."
 
           aws s3 cp \
             schema-runner.zip \
@@ -160,38 +353,27 @@ jobs:
             --region "$AWS_REGION"
 
 
+          echo "Schema package uploaded successfully."
+
+
       # =====================================================
-      # 8. VERIFY NETWORK STACK
+      # 12. VERIFY PACKAGE IN S3
       # =====================================================
 
-      - name: Verify Network Stack
+      - name: Verify package in S3
 
         run: |
 
-          aws cloudformation describe-stacks \
-            --stack-name "$NETWORK_STACK" \
-            --region "$AWS_REGION" \
-            --query "Stacks[0].StackStatus" \
-            --output text
+          aws s3api head-object \
+            --bucket "$LAMBDA_BUCKET" \
+            --key schema/schema-runner.zip \
+            --region "$AWS_REGION"
+
+          echo "Schema package exists in S3."
 
 
       # =====================================================
-      # 9. VERIFY DATA STACK
-      # =====================================================
-
-      - name: Verify Data Stack
-
-        run: |
-
-          aws cloudformation describe-stacks \
-            --stack-name "$DATA_STACK" \
-            --region "$AWS_REGION" \
-            --query "Stacks[0].StackStatus" \
-            --output text
-
-
-      # =====================================================
-      # 10. CHECK SCHEMA STACK
+      # 13. CHECK SCHEMA STACK
       # =====================================================
 
       - name: Check Schema Stack
@@ -207,15 +389,19 @@ jobs:
 
             echo "exists=true" >> "$GITHUB_OUTPUT"
 
+            echo "Schema Stack already exists."
+
           else
 
             echo "exists=false" >> "$GITHUB_OUTPUT"
+
+            echo "Schema Stack does not exist."
 
           fi
 
 
       # =====================================================
-      # 11. CREATE SCHEMA STACK
+      # 14. CREATE SCHEMA STACK
       # =====================================================
 
       - name: Create Schema Stack
@@ -224,9 +410,11 @@ jobs:
 
         run: |
 
+          echo "Creating Schema Stack..."
+
           aws cloudformation create-stack \
             --stack-name "$STACK_NAME" \
-            --template-body file://cloudformation/Schema-stack.yaml \
+            --template-body file://cloudformation/schema-stack.yaml \
             --parameters \
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
               ParameterKey=LambdaS3Key,ParameterValue=schema/schema-runner.zip \
@@ -235,7 +423,7 @@ jobs:
 
 
       # =====================================================
-      # 12. WAIT FOR CREATE
+      # 15. WAIT FOR CREATE
       # =====================================================
 
       - name: Wait for Schema Stack creation
@@ -244,16 +432,20 @@ jobs:
 
         run: |
 
+          echo "Waiting for Schema Stack..."
+
           aws cloudformation wait stack-create-complete \
             --stack-name "$STACK_NAME" \
             --region "$AWS_REGION"
 
+          echo "Schema Stack created successfully."
+
 
       # =====================================================
-      # 13. UPDATE SCHEMA STACK
+      # 16. CREATE CHANGE SET FOR EXISTING STACK
       # =====================================================
 
-      - name: Update Schema Stack
+      - name: Create Schema Change Set
 
         if: steps.stack.outputs.exists == 'true'
 
@@ -268,7 +460,7 @@ jobs:
             --stack-name "$STACK_NAME" \
             --change-set-name "$CHANGE_SET_NAME" \
             --change-set-type UPDATE \
-            --template-body file://cloudformation/Schema-stack.yaml \
+            --template-body file://cloudformation/schema-stack.yaml \
             --parameters \
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
               ParameterKey=LambdaS3Key,ParameterValue=schema/schema-runner.zip \
@@ -276,11 +468,35 @@ jobs:
             --region "$AWS_REGION"
 
 
+      # =====================================================
+      # 17. WAIT FOR CHANGE SET
+      # =====================================================
+
+      - name: Wait for Change Set
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="schema-${GITHUB_SHA}"
+
           aws cloudformation wait change-set-create-complete \
             --stack-name "$STACK_NAME" \
             --change-set-name "$CHANGE_SET_NAME" \
             --region "$AWS_REGION"
 
+
+      # =====================================================
+      # 18. EXECUTE CHANGE SET
+      # =====================================================
+
+      - name: Execute Change Set
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="schema-${GITHUB_SHA}"
 
           aws cloudformation execute-change-set \
             --stack-name "$STACK_NAME" \
@@ -289,7 +505,7 @@ jobs:
 
 
       # =====================================================
-      # 14. WAIT FOR UPDATE
+      # 19. WAIT FOR UPDATE
       # =====================================================
 
       - name: Wait for Schema Stack update
@@ -304,30 +520,39 @@ jobs:
 
 
       # =====================================================
-      # 15. WAIT FOR LAMBDA TO BE READY
+      # 20. VERIFY SCHEMA LAMBDA
       # =====================================================
 
-      - name: Wait for Schema Lambda
+      - name: Verify Schema Runner Lambda
 
         run: |
 
-          aws lambda wait function-updated \
-            --function-name CloudMart-dev-SchemaRunner \
-            --region "$AWS_REGION" || true
+          echo "Checking Schema Runner Lambda..."
+
+          aws lambda get-function \
+            --function-name "$FUNCTION_NAME" \
+            --region "$AWS_REGION" \
+            --query "Configuration.[FunctionName,Runtime,Handler,State]" \
+            --output table
 
 
       # =====================================================
-      # 16. INVOKE SCHEMA RUNNER
+      # 21. INVOKE SCHEMA RUNNER
       # =====================================================
 
       - name: Apply RDS schema
 
         run: |
 
-          echo "Applying database schema..."
+          echo "========================================"
+
+          echo "Applying RDS schema..."
+
+          echo "========================================"
+
 
           aws lambda invoke \
-            --function-name CloudMart-dev-SchemaRunner \
+            --function-name "$FUNCTION_NAME" \
             --invocation-type RequestResponse \
             --payload '{}' \
             --cli-binary-format raw-in-base64-out \
@@ -337,7 +562,7 @@ jobs:
 
           echo "========================================"
 
-          echo "SCHEMA RESPONSE"
+          echo "SCHEMA RUNNER RESPONSE"
 
           echo "========================================"
 
@@ -345,12 +570,17 @@ jobs:
 
 
       # =====================================================
-      # 17. VERIFY RESULT
+      # 22. VERIFY SCHEMA DEPLOYMENT
       # =====================================================
 
       - name: Verify schema deployment
 
         run: |
+
+          echo "Checking schema deployment..."
+
+          cat schema-response.json
+
 
           if grep -q '"statusCode": 200' schema-response.json; then
 
@@ -374,7 +604,28 @@ jobs:
 
 
       # =====================================================
-      # 18. DISPLAY OUTPUTS
+      # 23. VERIFY LAMBDA VPC CONFIGURATION
+      # =====================================================
+
+      - name: Verify Lambda VPC configuration
+
+        run: |
+
+          echo "Checking Schema Runner VPC configuration..."
+
+          aws lambda get-function-configuration \
+            --function-name "$FUNCTION_NAME" \
+            --region "$AWS_REGION" \
+            --query "{
+              FunctionName:FunctionName,
+              VpcId:VpcConfig.VpcId,
+              SubnetIds:VpcConfig.SubnetIds,
+              SecurityGroupIds:VpcConfig.SecurityGroupIds
+            }"
+
+
+      # =====================================================
+      # 24. DISPLAY SCHEMA STACK OUTPUTS
       # =====================================================
 
       - name: Display Schema Stack outputs
