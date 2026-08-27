@@ -2,22 +2,6 @@ CREATE DATABASE IF NOT EXISTS cloudmart;
 
 USE cloudmart;
 
--- =====================================================
--- USERS TABLE
--- =====================================================
-
-CREATE TABLE IF NOT EXISTS users (
-    user_id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(100) NOT NULL UNIQUE,
-    password VARCHAR(255) NOT NULL,
-    email VARCHAR(255) NOT NULL UNIQUE,
-    role VARCHAR(50) NOT NULL DEFAULT 'CUSTOMER',
-    active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        ON UPDATE CURRENT_TIMESTAMP
-);
-
 
 -- =====================================================
 -- PRODUCTS TABLE
@@ -56,37 +40,51 @@ CREATE TABLE IF NOT EXISTS inventory (
 
 
 -- =====================================================
--- INDEXES
+-- PRODUCTS CATEGORY INDEX
 -- =====================================================
 
-CREATE INDEX idx_products_category
-    ON products(category);
+-- Only create this index if it does not already exist.
 
-CREATE INDEX idx_inventory_product
-    ON inventory(product_id);
+SET @index_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'products'
+      AND index_name = 'idx_products_category'
+);
+
+SET @sql = IF(
+    @index_exists = 0,
+    'CREATE INDEX idx_products_category ON products(category)',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 
 -- =====================================================
--- SAMPLE USERS
+-- INVENTORY PRODUCT INDEX
 -- =====================================================
 
-INSERT INTO users
-    (username, password, email, role, active)
-VALUES
-    (
-        'customer1',
-        'CloudMart@123',
-        'customer1@cloudmart.com',
-        'CUSTOMER',
-        TRUE
-    ),
-    (
-        'customer2',
-        'CloudMart@456',
-        'customer2@cloudmart.com',
-        'CUSTOMER',
-        TRUE
-    );
+SET @index_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'inventory'
+      AND index_name = 'idx_inventory_product'
+);
+
+SET @sql = IF(
+    @index_exists = 0,
+    'CREATE INDEX idx_inventory_product ON inventory(product_id)',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 
 -- =====================================================
@@ -95,25 +93,44 @@ VALUES
 
 INSERT INTO products
     (name, description, price, category)
-VALUES
-    (
-        'Laptop',
-        '15 inch business laptop',
-        65000.00,
-        'Electronics'
-    ),
-    (
-        'Wireless Mouse',
-        'Wireless optical mouse',
-        1200.00,
-        'Accessories'
-    ),
-    (
-        'Keyboard',
-        'Mechanical keyboard',
-        3500.00,
-        'Accessories'
-    );
+SELECT
+    'Laptop',
+    '15 inch business laptop',
+    65000.00,
+    'Electronics'
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM products
+    WHERE name = 'Laptop'
+);
+
+
+INSERT INTO products
+    (name, description, price, category)
+SELECT
+    'Wireless Mouse',
+    'Wireless optical mouse',
+    1200.00,
+    'Accessories'
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM products
+    WHERE name = 'Wireless Mouse'
+);
+
+
+INSERT INTO products
+    (name, description, price, category)
+SELECT
+    'Keyboard',
+    'Mechanical keyboard',
+    3500.00,
+    'Accessories'
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM products
+    WHERE name = 'Keyboard'
+);
 
 
 -- =====================================================
@@ -122,7 +139,44 @@ VALUES
 
 INSERT INTO inventory
     (product_id, stock_count, low_stock_threshold)
-VALUES
-    (1, 25, 5),
-    (2, 50, 10),
-    (3, 8, 10);
+SELECT
+    product_id,
+    25,
+    5
+FROM products
+WHERE name = 'Laptop'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM inventory i
+      WHERE i.product_id = products.product_id
+  );
+
+
+INSERT INTO inventory
+    (product_id, stock_count, low_stock_threshold)
+SELECT
+    product_id,
+    50,
+    10
+FROM products
+WHERE name = 'Wireless Mouse'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM inventory i
+      WHERE i.product_id = products.product_id
+  );
+
+
+INSERT INTO inventory
+    (product_id, stock_count, low_stock_threshold)
+SELECT
+    product_id,
+    8,
+    10
+FROM products
+WHERE name = 'Keyboard'
+  AND NOT EXISTS (
+      SELECT 1
+      FROM inventory i
+      WHERE i.product_id = products.product_id
+  );
