@@ -13,29 +13,25 @@ def lambda_handler(event, context):
 
     try:
 
-        # -------------------------------------------------
-        # Get Authorization header
-        # -------------------------------------------------
+        # =================================================
+        # GET AUTHORIZATION TOKEN
+        # =================================================
 
-        headers = event.get("headers") or {}
-
-        authorization = (
-            headers.get("Authorization")
-            or headers.get("authorization")
-        )
+        authorization = event.get("authorizationToken")
 
         if not authorization:
+
             print(json.dumps({
                 "event": "authorization_failed",
-                "reason": "missing_authorization_header"
+                "reason": "missing_authorization_token"
             }))
 
             raise Exception("Unauthorized")
 
 
-        # -------------------------------------------------
-        # Validate Bearer token format
-        # -------------------------------------------------
+        # =================================================
+        # VALIDATE BEARER TOKEN FORMAT
+        # =================================================
 
         parts = authorization.split(" ", 1)
 
@@ -52,9 +48,9 @@ def lambda_handler(event, context):
         provided_token = parts[1]
 
 
-        # -------------------------------------------------
-        # Read expected token from SSM
-        # -------------------------------------------------
+        # =================================================
+        # GET EXPECTED TOKEN FROM SSM
+        # =================================================
 
         response = ssm.get_parameter(
             Name=TOKEN_PARAMETER,
@@ -64,9 +60,9 @@ def lambda_handler(event, context):
         expected_token = response["Parameter"]["Value"]
 
 
-        # -------------------------------------------------
-        # Compare tokens securely
-        # -------------------------------------------------
+        # =================================================
+        # COMPARE TOKENS
+        # =================================================
 
         if not hmac.compare_digest(
             provided_token,
@@ -81,34 +77,43 @@ def lambda_handler(event, context):
             raise Exception("Unauthorized")
 
 
-        # -------------------------------------------------
-        # Token is valid
-        # -------------------------------------------------
+        # =================================================
+        # AUTHORIZATION SUCCESS
+        # =================================================
 
         print(json.dumps({
             "event": "authorization_success"
         }))
 
 
-        # -------------------------------------------------
-        # IAM policy for API Gateway
-        # -------------------------------------------------
+        # =================================================
+        # CREATE IAM POLICY
+        # =================================================
 
         method_arn = event.get("methodArn", "*")
 
         policy = {
+
             "principalId": "cloudmart-user",
+
             "policyDocument": {
+
                 "Version": "2012-10-17",
+
                 "Statement": [
+
                     {
                         "Action": "execute-api:Invoke",
+
                         "Effect": "Allow",
+
                         "Resource": method_arn
                     }
+
                 ]
             }
         }
+
 
         return policy
 
