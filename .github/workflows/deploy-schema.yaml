@@ -74,7 +74,7 @@ jobs:
 
           LAMBDA_BUCKET=$(aws cloudformation list-exports \
             --region "$AWS_REGION" \
-            --query "Exports[?Name=='CloudMart-${ENVIRONMENT}-LambdaBucketName'].Value" \
+            --query "Exports[?Name=='CloudMart-${ENVIRONMENT}-LambdaBucket'].Value" \
             --output text)
 
           echo "Lambda bucket: $LAMBDA_BUCKET"
