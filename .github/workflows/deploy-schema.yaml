@@ -10,11 +10,22 @@ permissions:
 env:
   AWS_REGION: ap-south-1
   ENVIRONMENT: dev
-  FUNCTION_NAME: CloudMart-dev-SchemaRunner
-  LAMBDA_BUCKET: cloudmart-dev-lambda-430155298316
-  LAMBDA_ROLE_NAME: CloudMart-dev-ProductLambdaRole
+
+  # =====================================================
+  # EXISTING RESOURCES
+  # =====================================================
+
   NETWORK_STACK: cloudmart-dev-network
   DATA_STACK: cloudmart-dev-data
+
+  LAMBDA_BUCKET: cloudmart-dev-lambda-430155298316
+
+  # Existing Lambda execution role
+  LAMBDA_ROLE_NAME: CloudMart-dev-ProductLambdaRole
+
+  # Temporary schema runner Lambda
+  FUNCTION_NAME: CloudMart-dev-SchemaRunner
+
 
 jobs:
 
@@ -25,94 +36,230 @@ jobs:
     steps:
 
       # =====================================================
-      # 1. CHECKOUT
+      # 1. CHECKOUT REPOSITORY
       # =====================================================
 
       - name: Checkout repository
+
         uses: actions/checkout@v4
 
 
       # =====================================================
-      # 2. AWS CREDENTIALS
+      # 2. CONFIGURE AWS CREDENTIALS
       # =====================================================
 
       - name: Configure AWS credentials
+
         uses: aws-actions/configure-aws-credentials@v4
+
         with:
+
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
           aws-region: ${{ env.AWS_REGION }}
 
 
       # =====================================================
-      # 3. VERIFY AWS
+      # 3. VERIFY AWS IDENTITY
       # =====================================================
 
       - name: Verify AWS identity
+
         run: |
+
           aws sts get-caller-identity
 
 
       # =====================================================
-      # 4. VERIFY REQUIRED STACKS
+      # 4. VERIFY NETWORK STACK
       # =====================================================
 
-      - name: Verify infrastructure
+      - name: Verify Network Stack
+
         run: |
+
+          echo "Checking Network Stack..."
 
           aws cloudformation describe-stacks \
             --stack-name "$NETWORK_STACK" \
-            --region "$AWS_REGION"
+            --region "$AWS_REGION" \
+            --query "Stacks[0].StackStatus" \
+            --output text
+
+
+      # =====================================================
+      # 5. VERIFY DATA STACK
+      # =====================================================
+
+      - name: Verify Data Stack
+
+        run: |
+
+          echo "Checking Data Stack..."
 
           aws cloudformation describe-stacks \
             --stack-name "$DATA_STACK" \
-            --region "$AWS_REGION"
+            --region "$AWS_REGION" \
+            --query "Stacks[0].StackStatus" \
+            --output text
 
 
       # =====================================================
-      # 5. GET NETWORK INFORMATION
+      # 6. GET NETWORK INFORMATION
       # =====================================================
 
       - name: Get Network information
+
         run: |
 
-          VPC_ID=$(aws cloudformation describe-stacks \
-            --stack-name "$NETWORK_STACK" \
+          echo "========================================"
+          echo "Getting VPC ID..."
+          echo "========================================"
+
+          VPC_ID=$(aws cloudformation list-exports \
             --region "$AWS_REGION" \
-            --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue" \
+            --query "Exports[?Name=='CloudMart-${ENVIRONMENT}-VpcId'].Value" \
             --output text)
 
-          PRIVATE_SUBNET=$(aws cloudformation describe-stacks \
-            --stack-name "$NETWORK_STACK" \
+
+          echo "========================================"
+          echo "Getting Private Subnet..."
+          echo "========================================"
+
+          PRIVATE_SUBNET=$(aws cloudformation list-exports \
             --region "$AWS_REGION" \
-            --query "Stacks[0].Outputs[?OutputKey=='PrivateSubnetId'].OutputValue" \
+            --query "Exports[?Name=='CloudMart-${ENVIRONMENT}-PrivateSubnetId'].Value" \
             --output text)
 
-          LAMBDA_SG=$(aws cloudformation describe-stacks \
-            --stack-name "$NETWORK_STACK" \
+
+          echo "========================================"
+          echo "Getting Lambda Security Group..."
+          echo "========================================"
+
+          LAMBDA_SG=$(aws cloudformation list-exports \
             --region "$AWS_REGION" \
-            --query "Stacks[0].Outputs[?OutputKey=='LambdaSecurityGroupId'].OutputValue" \
+            --query "Exports[?Name=='CloudMart-${ENVIRONMENT}-LambdaSecurityGroupId'].Value" \
             --output text)
 
-          echo "VPC_ID=$VPC_ID"
-          echo "PRIVATE_SUBNET=$PRIVATE_SUBNET"
-          echo "LAMBDA_SG=$LAMBDA_SG"
+
+          echo "========================================"
+          echo "NETWORK INFORMATION"
+          echo "========================================"
+
+          echo "VPC_ID:         $VPC_ID"
+          echo "PRIVATE_SUBNET: $PRIVATE_SUBNET"
+          echo "LAMBDA_SG:      $LAMBDA_SG"
+
+          echo "========================================"
+
+
+          # =================================================
+          # VALIDATE VPC
+          # =================================================
+
+          if [ -z "$VPC_ID" ] || [ "$VPC_ID" = "None" ]; then
+
+            echo "ERROR: VPC ID was not found."
+
+            exit 1
+
+          fi
+
+
+          # =================================================
+          # VALIDATE PRIVATE SUBNET
+          # =================================================
+
+          if [ -z "$PRIVATE_SUBNET" ] || [ "$PRIVATE_SUBNET" = "None" ]; then
+
+            echo "ERROR: Private subnet was not found."
+
+            exit 1
+
+          fi
+
+
+          # =================================================
+          # VALIDATE LAMBDA SECURITY GROUP
+          # =================================================
+
+          if [ -z "$LAMBDA_SG" ] || [ "$LAMBDA_SG" = "None" ]; then
+
+            echo "ERROR: Lambda security group was not found."
+
+            exit 1
+
+          fi
+
+
+          # =================================================
+          # VALIDATE SECURITY GROUP FORMAT
+          # =================================================
+
+          if [[ ! "$LAMBDA_SG" =~ ^sg-[0-9a-zA-Z]+$ ]]; then
+
+            echo "ERROR: Invalid Lambda Security Group ID: $LAMBDA_SG"
+
+            exit 1
+
+          fi
+
+
+          echo "Network configuration verified successfully."
+
+
+          # =================================================
+          # SAVE VALUES FOR NEXT STEPS
+          # =================================================
 
           echo "VPC_ID=$VPC_ID" >> "$GITHUB_ENV"
+
           echo "PRIVATE_SUBNET=$PRIVATE_SUBNET" >> "$GITHUB_ENV"
+
           echo "LAMBDA_SG=$LAMBDA_SG" >> "$GITHUB_ENV"
 
 
       # =====================================================
-      # 6. GET LAMBDA EXECUTION ROLE
+      # 7. VERIFY LAMBDA SECURITY GROUP
+      # =====================================================
+
+      - name: Verify Lambda Security Group
+
+        run: |
+
+          echo "Checking Lambda Security Group..."
+
+          aws ec2 describe-security-groups \
+            --group-ids "$LAMBDA_SG" \
+            --region "$AWS_REGION" \
+            --query "SecurityGroups[0].[GroupId,GroupName,VpcId]" \
+            --output table
+
+
+      # =====================================================
+      # 8. GET LAMBDA EXECUTION ROLE
       # =====================================================
 
       - name: Get Lambda execution role
+
         run: |
+
+          echo "Getting Lambda execution role..."
 
           ROLE_ARN=$(aws iam get-role \
             --role-name "$LAMBDA_ROLE_NAME" \
             --query "Role.Arn" \
             --output text)
+
+
+          if [ -z "$ROLE_ARN" ] || [ "$ROLE_ARN" = "None" ]; then
+
+            echo "ERROR: Lambda execution role was not found."
+
+            exit 1
+
+          fi
+
 
           echo "ROLE_ARN=$ROLE_ARN"
 
@@ -120,23 +267,48 @@ jobs:
 
 
       # =====================================================
-      # 7. CREATE DEPLOYMENT PACKAGE
+      # 9. CREATE LAMBDA DEPLOYMENT PACKAGE
       # =====================================================
 
       - name: Create schema Lambda package
+
         run: |
 
+          echo "Creating Lambda package..."
+
           rm -rf package
+
           rm -f schema-runner.zip
 
           mkdir package
 
-          pip install PyMySQL \
+
+          # -------------------------------------------------
+          # Install PyMySQL
+          # -------------------------------------------------
+
+          python -m pip install \
+            PyMySQL \
             --target package
+
+
+          # -------------------------------------------------
+          # Copy Lambda code
+          # -------------------------------------------------
 
           cp lambda/schema-runner/lambda_function.py package/
 
+
+          # -------------------------------------------------
+          # Copy SQL schema
+          # -------------------------------------------------
+
           cp database/schema.sql package/
+
+
+          # -------------------------------------------------
+          # Create ZIP
+          # -------------------------------------------------
 
           cd package
 
@@ -146,23 +318,44 @@ jobs:
 
 
       # =====================================================
-      # 8. VERIFY PACKAGE
+      # 10. VERIFY ZIP PACKAGE
       # =====================================================
 
-      - name: Verify package
+      - name: Verify Lambda package
+
         run: |
 
+          echo "Checking Lambda package..."
+
           ls -lh schema-runner.zip
+
+          echo "========================================"
+
+          echo "ZIP CONTENTS"
+
+          echo "========================================"
 
           unzip -l schema-runner.zip
 
 
+          echo "========================================"
+
+          echo "Checking required files..."
+
+          unzip -l schema-runner.zip | grep lambda_function.py
+
+          unzip -l schema-runner.zip | grep schema.sql
+
+
       # =====================================================
-      # 9. UPLOAD PACKAGE TO S3
+      # 11. UPLOAD PACKAGE TO S3
       # =====================================================
 
       - name: Upload schema package
+
         run: |
+
+          echo "Uploading schema package to S3..."
 
           aws s3 cp \
             schema-runner.zip \
@@ -170,12 +363,17 @@ jobs:
             --region "$AWS_REGION"
 
 
+          echo "Package uploaded successfully."
+
+
       # =====================================================
-      # 10. CHECK IF SCHEMA LAMBDA EXISTS
+      # 12. CHECK WHETHER SCHEMA LAMBDA EXISTS
       # =====================================================
 
       - name: Check Schema Lambda
+
         id: lambda
+
         run: |
 
           if aws lambda get-function \
@@ -185,20 +383,43 @@ jobs:
 
             echo "exists=true" >> "$GITHUB_OUTPUT"
 
+            echo "Schema Lambda already exists."
+
           else
 
             echo "exists=false" >> "$GITHUB_OUTPUT"
+
+            echo "Schema Lambda does not exist."
 
           fi
 
 
       # =====================================================
-      # 11. CREATE SCHEMA LAMBDA
+      # 13. CREATE SCHEMA LAMBDA
       # =====================================================
 
       - name: Create Schema Lambda
+
         if: steps.lambda.outputs.exists == 'false'
+
         run: |
+
+          echo "========================================"
+          echo "CREATING SCHEMA LAMBDA"
+          echo "========================================"
+
+          echo "Function:       $FUNCTION_NAME"
+
+          echo "Role:           $ROLE_ARN"
+
+          echo "VPC:            $VPC_ID"
+
+          echo "Subnet:         $PRIVATE_SUBNET"
+
+          echo "Security Group: $LAMBDA_SG"
+
+          echo "========================================"
+
 
           aws lambda create-function \
             --function-name "$FUNCTION_NAME" \
@@ -208,20 +429,22 @@ jobs:
             --code S3Bucket="$LAMBDA_BUCKET",S3Key=schema/schema-runner.zip \
             --timeout 120 \
             --memory-size 256 \
-            --environment "Variables={
-              ENVIRONMENT=dev
-            }" \
+            --environment "Variables={ENVIRONMENT=$ENVIRONMENT}" \
             --vpc-config "SubnetIds=$PRIVATE_SUBNET,SecurityGroupIds=$LAMBDA_SG" \
             --region "$AWS_REGION"
 
 
       # =====================================================
-      # 12. UPDATE SCHEMA LAMBDA
+      # 14. UPDATE SCHEMA LAMBDA
       # =====================================================
 
       - name: Update Schema Lambda
+
         if: steps.lambda.outputs.exists == 'true'
+
         run: |
+
+          echo "Updating Schema Lambda code..."
 
           aws lambda update-function-code \
             --function-name "$FUNCTION_NAME" \
@@ -229,24 +452,13 @@ jobs:
             --s3-key schema/schema-runner.zip \
             --region "$AWS_REGION"
 
-          aws lambda update-function-configuration \
-            --function-name "$FUNCTION_NAME" \
-            --runtime python3.12 \
-            --handler lambda_function.lambda_handler \
-            --timeout 120 \
-            --memory-size 256 \
-            --environment "Variables={
-              ENVIRONMENT=dev
-            }" \
-            --vpc-config "SubnetIds=$PRIVATE_SUBNET,SecurityGroupIds=$LAMBDA_SG" \
-            --region "$AWS_REGION"
-
 
       # =====================================================
-      # 13. WAIT FOR UPDATE
+      # 15. WAIT FOR CODE UPDATE
       # =====================================================
 
-      - name: Wait for Lambda
+      - name: Wait for Lambda code update
+
         run: |
 
           aws lambda wait function-updated \
@@ -255,11 +467,52 @@ jobs:
 
 
       # =====================================================
-      # 14. INVOKE SCHEMA RUNNER
+      # 16. UPDATE LAMBDA CONFIGURATION
+      # =====================================================
+
+      - name: Update Lambda configuration
+
+        if: steps.lambda.outputs.exists == 'true'
+
+        run: |
+
+          aws lambda update-function-configuration \
+            --function-name "$FUNCTION_NAME" \
+            --handler lambda_function.lambda_handler \
+            --timeout 120 \
+            --memory-size 256 \
+            --environment "Variables={ENVIRONMENT=$ENVIRONMENT}" \
+            --vpc-config "SubnetIds=$PRIVATE_SUBNET,SecurityGroupIds=$LAMBDA_SG" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 17. WAIT FOR LAMBDA
+      # =====================================================
+
+      - name: Wait for Lambda
+
+        run: |
+
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 18. INVOKE SCHEMA RUNNER
       # =====================================================
 
       - name: Apply database schema
+
         run: |
+
+          echo "========================================"
+
+          echo "Applying RDS schema..."
+
+          echo "========================================"
+
 
           aws lambda invoke \
             --function-name "$FUNCTION_NAME" \
@@ -269,27 +522,44 @@ jobs:
             schema-response.json \
             --region "$AWS_REGION"
 
-          echo "===== SCHEMA RESPONSE ====="
+
+          echo "========================================"
+
+          echo "SCHEMA LAMBDA RESPONSE"
+
+          echo "========================================"
 
           cat schema-response.json
 
 
       # =====================================================
-      # 15. CHECK LAMBDA RESPONSE
+      # 19. VERIFY SCHEMA DEPLOYMENT
       # =====================================================
 
       - name: Verify schema deployment
+
         run: |
+
+          echo "Checking schema deployment result..."
 
           cat schema-response.json
 
+
           if grep -q '"statusCode": 200' schema-response.json; then
 
-            echo "Schema deployment successful."
+            echo "========================================"
+
+            echo "RDS SCHEMA DEPLOYMENT SUCCESSFUL"
+
+            echo "========================================"
 
           else
 
-            echo "Schema deployment failed."
+            echo "========================================"
+
+            echo "RDS SCHEMA DEPLOYMENT FAILED"
+
+            echo "========================================"
 
             exit 1
 
@@ -297,15 +567,34 @@ jobs:
 
 
       # =====================================================
-      # 16. SHOW LOG GROUP
+      # 20. SHOW LAMBDA LOG GROUP
       # =====================================================
 
-      - name: Show Schema Runner logs
+      - name: Show Schema Runner log group
+
         run: |
 
-          aws logs describe-log-streams \
-            --log-group-name "/aws/lambda/$FUNCTION_NAME" \
-            --order-by LastEventTime \
-            --descending \
-            --max-items 5 \
-            --region "$AWS_REGION" || true
+          echo "Schema Lambda log group:"
+
+          echo "/aws/lambda/$FUNCTION_NAME"
+
+
+      # =====================================================
+      # 21. VERIFY LAMBDA CONFIGURATION
+      # =====================================================
+
+      - name: Verify Lambda VPC configuration
+
+        run: |
+
+          aws lambda get-function-configuration \
+            --function-name "$FUNCTION_NAME" \
+            --region "$AWS_REGION" \
+            --query "{
+              FunctionName:FunctionName,
+              Runtime:Runtime,
+              Handler:Handler,
+              VpcId:VpcConfig.VpcId,
+              SubnetIds:VpcConfig.SubnetIds,
+              SecurityGroupIds:VpcConfig.SecurityGroupIds
+            }"
