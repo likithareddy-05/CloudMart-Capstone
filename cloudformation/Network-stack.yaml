@@ -283,11 +283,6 @@ Resources:
           ToPort: 443
           CidrIp: 0.0.0.0/0
 
-        - IpProtocol: tcp
-          FromPort: 3306
-          ToPort: 3306
-          DestinationSecurityGroupId: !Ref RdsSecurityGroup
-
       Tags:
         - Key: Name
           Value: !Sub cloudmart-${Environment}-lambda-sg
@@ -592,4 +587,4 @@ Outputs:
 
     Export:
       Name:
-        !Sub CloudMart-${Environment}-CloudWatchLogsVpcEndpoint
+        !Sub CloudMart-${Environment}-CloudWatchLogsVpcEndpointId
