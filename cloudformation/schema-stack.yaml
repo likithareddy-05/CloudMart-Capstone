@@ -80,7 +80,7 @@ Resources:
 
         S3Bucket:
           Fn::ImportValue:
-            !Sub CloudMart-${Environment}-LambdaBucketName
+            !Sub CloudMart-${Environment}-LambdaBucket
 
         S3Key:
           !Ref LambdaS3Key
