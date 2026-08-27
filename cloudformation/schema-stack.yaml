@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  CloudMart Database Schema Stack.
+  Creates a temporary Schema Runner Lambda in the
+  private subnet to apply schema.sql to RDS MySQL.
+
+# =========================================================
+# PARAMETERS
+# =========================================================
+
+Parameters:
+
+  Environment:
+    Type: String
+    Default: dev
+
+    AllowedValues:
+      - dev
+      - test
+      - prod
+
+
+  LambdaS3Key:
+    Type: String
+    Default: schema/schema-runner.zip
+
+    Description: >
+      S3 key containing the Schema Runner Lambda package.
+
+
+  LambdaFunctionName:
+    Type: String
+    Default: CloudMart-dev-SchemaRunner
+
+
+# =========================================================
+# RESOURCES
+# =========================================================
+
+Resources:
+
+
+  # =======================================================
+  # SCHEMA RUNNER LAMBDA
+  # =======================================================
+
+  SchemaRunnerLambda:
+    Type: AWS::Lambda::Function
+
+    Properties:
+
+      FunctionName:
+        !Ref LambdaFunctionName
+
+      Runtime: python3.12
+
+      Handler: lambda_function.lambda_handler
+
+      Timeout: 120
+
+      MemorySize: 256
+
+
+      # ---------------------------------------------------
+      # EXISTING IAM ROLE
+      # ---------------------------------------------------
+
+      Role:
+        Fn::Sub:
+          - arn:${AWS::Partition}:iam::${AWS::AccountId}:role/CloudMart-${Environment}-ProductLambdaRole
+          - {}
+
+
+      # ---------------------------------------------------
+      # LAMBDA CODE
+      # ---------------------------------------------------
+
+      Code:
+
+        S3Bucket:
+          Fn::ImportValue:
+            !Sub CloudMart-${Environment}-LambdaBucketName
+
+        S3Key:
+          !Ref LambdaS3Key
+
+
+      # ---------------------------------------------------
+      # ENVIRONMENT
+      # ---------------------------------------------------
+
+      Environment:
+
+        Variables:
+
+          ENVIRONMENT:
+            !Ref Environment
+
+
+      # ---------------------------------------------------
+      # VPC CONFIGURATION
+      # ---------------------------------------------------
+
+      VpcConfig:
+
+        SubnetIds:
+
+          - Fn::ImportValue:
+              !Sub CloudMart-${Environment}-PrivateSubnetId
+
+        SecurityGroupIds:
+
+          - Fn::ImportValue:
+              !Sub CloudMart-${Environment}-LambdaSecurityGroupId
+
+
+      # ---------------------------------------------------
+      # TAGS
+      # ---------------------------------------------------
+
+      Tags:
+
+        - Key: Name
+          Value: !Sub CloudMart-${Environment}-SchemaRunner
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+# =========================================================
+# OUTPUTS
+# =========================================================
+
+Outputs:
+
+
+  # =======================================================
+  # SCHEMA RUNNER ARN
+  # =======================================================
+
+  SchemaRunnerLambdaArn:
+
+    Description:
+      CloudMart Schema Runner Lambda ARN
+
+    Value:
+      !GetAtt SchemaRunnerLambda.Arn
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-SchemaRunnerLambdaArn
+
+
+  # =======================================================
+  # SCHEMA RUNNER NAME
+  # =======================================================
+
+  SchemaRunnerLambdaName:
+
+    Description:
+      CloudMart Schema Runner Lambda name
+
+    Value:
+      !Ref SchemaRunnerLambda
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-SchemaRunnerLambdaName
