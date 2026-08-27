@@ -155,7 +155,7 @@ Resources:
             !Sub CloudMart-${Environment}-LambdaBucket
 
         S3Key:
-          authorizer/authorizer.zip
+          authorizer/authorizer-${Version}.zip
 
 
   # =======================================================
