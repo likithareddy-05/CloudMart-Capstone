@@ -1,0 +1,489 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  CloudMart API Stack.
+  Creates API Gateway and Product Lambda.
+  Product Lambda runs inside the existing VPC
+  and connects to the existing RDS database.
+
+
+# =========================================================
+# PARAMETERS
+# =========================================================
+
+Parameters:
+
+  Environment:
+    Type: String
+    Default: dev
+
+    AllowedValues:
+      - dev
+      - test
+      - prod
+
+    Description: Deployment environment
+
+
+  LambdaS3Key:
+    Type: String
+    Default: product/product.zip
+
+    Description: >
+      S3 key containing the Product Lambda package.
+
+
+# =========================================================
+# RESOURCES
+# =========================================================
+
+Resources:
+
+
+  # =======================================================
+  # PRODUCT LAMBDA
+  # =======================================================
+
+  ProductLambda:
+
+    Type: AWS::Lambda::Function
+
+    Properties:
+
+      FunctionName:
+        !Sub CloudMart-${Environment}-ProductLambda
+
+      Runtime: python3.12
+
+      Handler: lambda_function.lambda_handler
+
+      MemorySize: 256
+
+      Timeout: 30
+
+      Role:
+        Fn::ImportValue:
+          !Sub CloudMart-${Environment}-ProductLambdaRoleArn
+
+
+      # ---------------------------------------------------
+      # ENVIRONMENT
+      # ---------------------------------------------------
+
+      Environment:
+
+        Variables:
+
+          ENVIRONMENT:
+            !Ref Environment
+
+
+      # ---------------------------------------------------
+      # VPC
+      # ---------------------------------------------------
+
+      VpcConfig:
+
+        SubnetIds:
+
+          - Fn::ImportValue:
+              !Sub CloudMart-${Environment}-PrivateSubnetId
+
+        SecurityGroupIds:
+
+          - Fn::ImportValue:
+              !Sub CloudMart-${Environment}-LambdaSecurityGroupId
+
+
+      # ---------------------------------------------------
+      # LAMBDA CODE
+      # ---------------------------------------------------
+
+      Code:
+
+        S3Bucket:
+
+          Fn::ImportValue:
+            !Sub CloudMart-${Environment}-LambdaBucket
+
+        S3Key:
+          !Ref LambdaS3Key
+
+
+  # =======================================================
+  # API GATEWAY
+  # =======================================================
+
+  ApiGateway:
+
+    Type: AWS::ApiGateway::RestApi
+
+    Properties:
+
+      Name:
+        !Sub CloudMart-${Environment}-API
+
+      Description:
+        CloudMart Product API
+
+
+  # =======================================================
+  # /products
+  # =======================================================
+
+  ProductsResource:
+
+    Type: AWS::ApiGateway::Resource
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      ParentId:
+        !GetAtt ApiGateway.RootResourceId
+
+      PathPart: products
+
+
+  # =======================================================
+  # /products/{id}
+  # =======================================================
+
+  ProductIdResource:
+
+    Type: AWS::ApiGateway::Resource
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      ParentId:
+        !Ref ProductsResource
+
+      PathPart: '{id}'
+
+
+  # =======================================================
+  # AUTHORIZE
+  # =======================================================
+
+  Authorizer:
+
+    Type: AWS::ApiGateway::Authorizer
+
+    Properties:
+
+      Name:
+        !Sub CloudMart-${Environment}-Authorizer
+
+      RestApiId:
+        !Ref ApiGateway
+
+      Type: TOKEN
+
+      IdentitySource:
+        method.request.header.Authorization
+
+      AuthorizerUri:
+        !Sub
+          - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthorizerArn}/invocations
+          - AuthorizerArn:
+              Fn::ImportValue:
+                !Sub CloudMart-${Environment}-AuthorizerLambdaArn
+
+      AuthorizerResultTtlInSeconds: 300
+
+
+  # =======================================================
+  # GET /products
+  # =======================================================
+
+  GetProductsMethod:
+
+    Type: AWS::ApiGateway::Method
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      ResourceId:
+        !Ref ProductsResource
+
+      HttpMethod: GET
+
+      AuthorizationType: CUSTOM
+
+      AuthorizerId:
+        !Ref Authorizer
+
+      Integration:
+
+        Type: AWS_PROXY
+
+        IntegrationHttpMethod: POST
+
+        Uri:
+          !Sub
+            - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProductLambdaArn}/invocations
+            - ProductLambdaArn:
+                !GetAtt ProductLambda.Arn
+
+
+  # =======================================================
+  # POST /products
+  # =======================================================
+
+  PostProductsMethod:
+
+    Type: AWS::ApiGateway::Method
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      ResourceId:
+        !Ref ProductsResource
+
+      HttpMethod: POST
+
+      AuthorizationType: CUSTOM
+
+      AuthorizerId:
+        !Ref Authorizer
+
+      Integration:
+
+        Type: AWS_PROXY
+
+        IntegrationHttpMethod: POST
+
+        Uri:
+          !Sub
+            - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProductLambdaArn}/invocations
+            - ProductLambdaArn:
+                !GetAtt ProductLambda.Arn
+
+
+  # =======================================================
+  # GET /products/{id}
+  # =======================================================
+
+  GetProductMethod:
+
+    Type: AWS::ApiGateway::Method
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      ResourceId:
+        !Ref ProductIdResource
+
+      HttpMethod: GET
+
+      AuthorizationType: CUSTOM
+
+      AuthorizerId:
+        !Ref Authorizer
+
+      Integration:
+
+        Type: AWS_PROXY
+
+        IntegrationHttpMethod: POST
+
+        Uri:
+          !Sub
+            - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProductLambdaArn}/invocations
+            - ProductLambdaArn:
+                !GetAtt ProductLambda.Arn
+
+
+  # =======================================================
+  # PUT /products/{id}
+  # =======================================================
+
+  PutProductMethod:
+
+    Type: AWS::ApiGateway::Method
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      ResourceId:
+        !Ref ProductIdResource
+
+      HttpMethod: PUT
+
+      AuthorizationType: CUSTOM
+
+      AuthorizerId:
+        !Ref Authorizer
+
+      Integration:
+
+        Type: AWS_PROXY
+
+        IntegrationHttpMethod: POST
+
+        Uri:
+          !Sub
+            - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProductLambdaArn}/invocations
+            - ProductLambdaArn:
+                !GetAtt ProductLambda.Arn
+
+
+  # =======================================================
+  # DELETE /products/{id}
+  # =======================================================
+
+  DeleteProductMethod:
+
+    Type: AWS::ApiGateway::Method
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      ResourceId:
+        !Ref ProductIdResource
+
+      HttpMethod: DELETE
+
+      AuthorizationType: CUSTOM
+
+      AuthorizerId:
+        !Ref Authorizer
+
+      Integration:
+
+        Type: AWS_PROXY
+
+        IntegrationHttpMethod: POST
+
+        Uri:
+          !Sub
+            - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProductLambdaArn}/invocations
+            - ProductLambdaArn:
+                !GetAtt ProductLambda.Arn
+
+
+  # =======================================================
+  # LAMBDA PERMISSION
+  # =======================================================
+
+  ProductLambdaPermission:
+
+    Type: AWS::Lambda::Permission
+
+    Properties:
+
+      FunctionName:
+        !Ref ProductLambda
+
+      Action:
+        lambda:InvokeFunction
+
+      Principal:
+        apigateway.amazonaws.com
+
+
+  # =======================================================
+  # API DEPLOYMENT
+  # =======================================================
+
+  ApiDeployment:
+
+    Type: AWS::ApiGateway::Deployment
+
+    DependsOn:
+
+      - GetProductsMethod
+      - PostProductsMethod
+      - GetProductMethod
+      - PutProductMethod
+      - DeleteProductMethod
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      StageName:
+        !Ref Environment
+
+
+# =========================================================
+# OUTPUTS
+# =========================================================
+
+Outputs:
+
+
+  # =======================================================
+  # API URL
+  # =======================================================
+
+  ApiUrl:
+
+    Description:
+      CloudMart API Gateway URL
+
+    Value:
+      !Sub
+        https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
+
+
+  # =======================================================
+  # API ID
+  # =======================================================
+
+  ApiId:
+
+    Description:
+      API Gateway ID
+
+    Value:
+      !Ref ApiGateway
+
+
+  # =======================================================
+  # PRODUCT LAMBDA ARN
+  # =======================================================
+
+  ProductLambdaArn:
+
+    Description:
+      Product Lambda ARN
+
+    Value:
+      !GetAtt ProductLambda.Arn
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-ProductLambdaArn
+
+
+  # =======================================================
+  # PRODUCT LAMBDA NAME
+  # =======================================================
+
+  ProductLambdaName:
+
+    Description:
+      Product Lambda name
+
+    Value:
+      !Ref ProductLambda
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-ProductLambdaName

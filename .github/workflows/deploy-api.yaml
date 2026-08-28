@@ -1,0 +1,335 @@
+name: Deploy API Stack
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+
+  AWS_REGION: ap-south-1
+
+  ENVIRONMENT: dev
+
+  STACK_NAME: cloudmart-dev-api
+
+  LAMBDA_BUCKET: cloudmart-dev-lambda-430155298316
+
+
+jobs:
+
+  deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # =================================================
+      # CHECKOUT
+      # =================================================
+
+      - name: Checkout repository
+
+        uses: actions/checkout@v4
+
+
+      # =================================================
+      # AWS CREDENTIALS
+      # =================================================
+
+      - name: Configure AWS credentials
+
+        uses: aws-actions/configure-aws-credentials@v4
+
+        with:
+
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # =================================================
+      # VERIFY AWS
+      # =================================================
+
+      - name: Verify AWS identity
+
+        run: |
+
+          aws sts get-caller-identity
+
+
+      # =================================================
+      # PREPARE PACKAGE
+      # =================================================
+
+      - name: Prepare Product Lambda package
+
+        run: |
+
+          rm -rf package
+
+          mkdir package
+
+
+      # =================================================
+      # INSTALL PYMYSQL
+      # =================================================
+
+      - name: Install PyMySQL
+
+        run: |
+
+          python -m pip install \
+            PyMySQL \
+            --target package
+
+
+      # =================================================
+      # COPY PRODUCT LAMBDA
+      # =================================================
+
+      - name: Copy Product Lambda
+
+        run: |
+
+          cp lambda/product/lambda_function.py package/
+
+
+      # =================================================
+      # CREATE ZIP
+      # =================================================
+
+      - name: Create Product Lambda ZIP
+
+        run: |
+
+          cd package
+
+          zip -r "../product-${GITHUB_SHA}.zip" .
+
+          cd ..
+
+
+      # =================================================
+      # SET S3 KEY
+      # =================================================
+
+      - name: Set Lambda S3 key
+
+        run: |
+
+          echo "LAMBDA_S3_KEY=product/product-${GITHUB_SHA}.zip" >> "$GITHUB_ENV"
+
+
+      # =================================================
+      # UPLOAD ZIP
+      # =================================================
+
+      - name: Upload Product Lambda package
+
+        run: |
+
+          aws s3 cp \
+            "product-${GITHUB_SHA}.zip" \
+            "s3://${LAMBDA_BUCKET}/${LAMBDA_S3_KEY}" \
+            --region "$AWS_REGION"
+
+
+      # =================================================
+      # VERIFY S3
+      # =================================================
+
+      - name: Verify S3 package
+
+        run: |
+
+          aws s3api head-object \
+            --bucket "$LAMBDA_BUCKET" \
+            --key "$LAMBDA_S3_KEY" \
+            --region "$AWS_REGION"
+
+
+      # =================================================
+      # VALIDATE TEMPLATE
+      # =================================================
+
+      - name: Validate API Stack
+
+        run: |
+
+          aws cloudformation validate-template \
+            --template-body file://cloudformation/api-stack.yaml \
+            --region "$AWS_REGION"
+
+
+      # =================================================
+      # CHECK STACK
+      # =================================================
+
+      - name: Check API Stack
+
+        id: stack
+
+        run: |
+
+          if aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            > /dev/null 2>&1; then
+
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+
+          else
+
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+
+          fi
+
+
+      # =================================================
+      # CREATE STACK
+      # =================================================
+
+      - name: Create API Stack
+
+        if: steps.stack.outputs.exists == 'false'
+
+        run: |
+
+          echo "Creating API Stack..."
+
+          aws cloudformation create-stack \
+            --stack-name "$STACK_NAME" \
+            --template-body file://cloudformation/api-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+              ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION"
+
+
+      # =================================================
+      # WAIT FOR CREATE
+      # =================================================
+
+      - name: Wait for API Stack
+
+        if: steps.stack.outputs.exists == 'false'
+
+        run: |
+
+          echo "Waiting for API Stack..."
+
+          aws cloudformation wait stack-create-complete \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =================================================
+      # CREATE CHANGE SET
+      # =================================================
+
+      - name: Create API Change Set
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="api-${GITHUB_SHA}"
+
+          echo "Creating Change Set..."
+
+          aws cloudformation create-change-set \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --change-set-type UPDATE \
+            --template-body file://cloudformation/api-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+              ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION"
+
+
+      # =================================================
+      # WAIT FOR CHANGE SET
+      # =================================================
+
+      - name: Wait for Change Set
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="api-${GITHUB_SHA}"
+
+          aws cloudformation wait change-set-create-complete \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =================================================
+      # EXECUTE CHANGE SET
+      # =================================================
+
+      - name: Execute Change Set
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="api-${GITHUB_SHA}"
+
+          aws cloudformation execute-change-set \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =================================================
+      # WAIT FOR UPDATE
+      # =================================================
+
+      - name: Wait for API Stack update
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          aws cloudformation wait stack-update-complete \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION"
+
+
+      # =================================================
+      # VERIFY PRODUCT LAMBDA
+      # =================================================
+
+      - name: Verify Product Lambda
+
+        run: |
+
+          aws lambda get-function \
+            --function-name CloudMart-dev-ProductLambda \
+            --region "$AWS_REGION" \
+            --query "Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler}" \
+            --output table
+
+
+      # =================================================
+      # DISPLAY API URL
+      # =================================================
+
+      - name: Display API URL
+
+        run: |
+
+          aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs" \
+            --output table
