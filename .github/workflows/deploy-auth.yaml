@@ -15,7 +15,7 @@ env:
   # IMPORTANT:
   # This must be the actual S3 bucket that stores
   # your Lambda deployment packages.
-  LAMBDA_BUCKET: cloudmart-dev-Productlambda-430155298316
+  LAMBDA_BUCKET: cloudmart-dev-lambda-430155298316
 
 jobs:
 
