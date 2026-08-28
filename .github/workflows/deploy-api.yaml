@@ -537,7 +537,6 @@ jobs:
             --query "{Name:Name,State:State,EventBusName:EventBusName}" \
             --output table
 
-
       # =================================================
       # VERIFY SNS TOPIC
       # =================================================
@@ -546,12 +545,29 @@ jobs:
 
         run: |
 
-          aws sns get-topic-attributes \
-            --topic-arn \
-              "arn:aws:sns:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:CloudMart-${ENVIRONMENT}-LowStockTopic" \
+          echo "Checking Low Stock SNS Topic..."
+
+          SNS_TOPIC_ARN=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
             --region "$AWS_REGION" \
-            --query "Attributes.{TopicArn:TopicArn}" \
-            --output table
+            --query "Stacks[0].Outputs[?OutputKey=='LowStockTopicArn'].OutputValue" \
+            --output text)
+
+          echo "SNS Topic ARN: $SNS_TOPIC_ARN"
+
+          if [ -z "$SNS_TOPIC_ARN" ] || [ "$SNS_TOPIC_ARN" = "None" ]; then
+
+            echo "LowStockTopicArn output was not found."
+
+            exit 1
+
+          fi
+
+          aws sns get-topic-attributes \
+            --topic-arn "$SNS_TOPIC_ARN" \
+            --region "$AWS_REGION"
+
+          echo "SNS Topic verified successfully."
 
 
       # =================================================
