@@ -2,9 +2,9 @@ AWSTemplateFormatVersion: '2010-09-09'
 
 Description: >
   CloudMart Authentication Stack.
-  Creates USER and ADMIN authentication tokens
-  in SSM Parameter Store and a Lambda Authorizer
-  for API Gateway.
+  Creates the Lambda Authorizer used by API Gateway.
+  Authentication tokens are stored as SecureString
+  parameters in AWS Systems Manager Parameter Store.
 
 
 # =========================================================
@@ -25,22 +25,24 @@ Parameters:
     Description: Deployment environment
 
 
-  UserToken:
+  UserTokenParameterName:
     Type: String
-    NoEcho: true
+
+    Default: /cloudmart/dev/auth/user-token
 
     Description: >
-      Authentication token for USER role.
-      Supplied securely through GitHub Actions.
+      SSM Parameter Store path containing the
+      USER authentication token.
 
 
-  AdminToken:
+  AdminTokenParameterName:
     Type: String
-    NoEcho: true
+
+    Default: /cloudmart/dev/auth/admin-token
 
     Description: >
-      Authentication token for ADMIN role.
-      Supplied securely through GitHub Actions.
+      SSM Parameter Store path containing the
+      ADMIN authentication token.
 
 
   LambdaS3Key:
@@ -49,7 +51,8 @@ Parameters:
     Default: authorizer/authorizer.zip
 
     Description: >
-      S3 key containing the Authorizer Lambda package.
+      S3 key containing the Authorizer Lambda
+      deployment package.
 
 
 # =========================================================
@@ -57,50 +60,6 @@ Parameters:
 # =========================================================
 
 Resources:
-
-
-  # =======================================================
-  # USER TOKEN - SSM SECURE STRING
-  # =======================================================
-
-  UserTokenParameter:
-
-    Type: AWS::SSM::Parameter
-
-    Properties:
-
-      Name:
-        !Sub /cloudmart/${Environment}/auth/user-token
-
-      Type: SecureString
-
-      Value:
-        !Ref UserToken
-
-      Description:
-        !Sub CloudMart ${Environment} USER authentication token
-
-
-  # =======================================================
-  # ADMIN TOKEN - SSM SECURE STRING
-  # =======================================================
-
-  AdminTokenParameter:
-
-    Type: AWS::SSM::Parameter
-
-    Properties:
-
-      Name:
-        !Sub /cloudmart/${Environment}/auth/admin-token
-
-      Type: SecureString
-
-      Value:
-        !Ref AdminToken
-
-      Description:
-        !Sub CloudMart ${Environment} ADMIN authentication token
 
 
   # =======================================================
@@ -117,6 +76,10 @@ Resources:
         !Sub CloudMart-${Environment}-AuthorizerRole
 
 
+      # ---------------------------------------------------
+      # Lambda trust policy
+      # ---------------------------------------------------
+
       AssumeRolePolicyDocument:
 
         Version: '2012-10-17'
@@ -126,7 +89,6 @@ Resources:
           - Effect: Allow
 
             Principal:
-
               Service:
                 - lambda.amazonaws.com
 
@@ -134,12 +96,16 @@ Resources:
               - sts:AssumeRole
 
 
+      # ---------------------------------------------------
+      # IAM POLICIES
+      # ---------------------------------------------------
+
       Policies:
 
 
-        # -------------------------------------------------
+        # =================================================
         # CLOUDWATCH LOGGING
-        # -------------------------------------------------
+        # =================================================
 
         - PolicyName:
             !Sub CloudMart-${Environment}-AuthorizerLogs
@@ -163,9 +129,9 @@ Resources:
                   - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*
 
 
-        # -------------------------------------------------
+        # =================================================
         # SSM TOKEN ACCESS
-        # -------------------------------------------------
+        # =================================================
 
         - PolicyName:
             !Sub CloudMart-${Environment}-AuthorizerSSM
@@ -184,8 +150,15 @@ Resources:
 
                 Resource:
 
-                  - !GetAtt UserTokenParameter.Arn
-                  - !GetAtt AdminTokenParameter.Arn
+                  # USER SecureString
+                  - !Sub
+                    - arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}
+                    - ParameterName: !Ref UserTokenParameterName
+
+                  # ADMIN SecureString
+                  - !Sub
+                    - arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}
+                    - ParameterName: !Ref AdminTokenParameterName
 
 
   # =======================================================
@@ -222,20 +195,19 @@ Resources:
         Variables:
 
           USER_TOKEN_PARAMETER:
-            !Ref UserTokenParameter
+            !Ref UserTokenParameterName
 
           ADMIN_TOKEN_PARAMETER:
-            !Ref AdminTokenParameter
+            !Ref AdminTokenParameterName
 
 
       # ---------------------------------------------------
-      # LAMBDA PACKAGE
+      # LAMBDA CODE
       # ---------------------------------------------------
 
       Code:
 
         S3Bucket:
-
           Fn::ImportValue:
             !Sub CloudMart-${Environment}-LambdaBucket
 
@@ -244,7 +216,7 @@ Resources:
 
 
   # =======================================================
-  # API GATEWAY INVOKE PERMISSION
+  # API GATEWAY PERMISSION
   # =======================================================
 
   AuthorizerInvokePermission:
@@ -271,29 +243,37 @@ Outputs:
 
 
   # =======================================================
-  # USER TOKEN PARAMETER
+  # USER PARAMETER NAME
   # =======================================================
 
   UserTokenParameterName:
 
     Description:
-      USER token SSM parameter name
+      USER authentication token SSM parameter name
 
     Value:
-      !Ref UserTokenParameter
+      !Ref UserTokenParameterName
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-UserTokenParameterName
 
 
   # =======================================================
-  # ADMIN TOKEN PARAMETER
+  # ADMIN PARAMETER NAME
   # =======================================================
 
   AdminTokenParameterName:
 
     Description:
-      ADMIN token SSM parameter name
+      ADMIN authentication token SSM parameter name
 
     Value:
-      !Ref AdminTokenParameter
+      !Ref AdminTokenParameterName
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-AdminTokenParameterName
 
 
   # =======================================================
@@ -309,7 +289,6 @@ Outputs:
       !GetAtt AuthorizerLambda.Arn
 
     Export:
-
       Name:
         !Sub CloudMart-${Environment}-AuthorizerLambdaArn
 
@@ -327,7 +306,6 @@ Outputs:
       !Ref AuthorizerLambda
 
     Export:
-
       Name:
         !Sub CloudMart-${Environment}-AuthorizerLambdaName
 
@@ -345,6 +323,5 @@ Outputs:
       !GetAtt AuthorizerExecutionRole.Arn
 
     Export:
-
       Name:
         !Sub CloudMart-${Environment}-AuthorizerRoleArn

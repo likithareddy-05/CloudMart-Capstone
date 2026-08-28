@@ -160,7 +160,6 @@ def lambda_handler(event, context):
                 "Invalid methodArn"
             )
 
-
         http_method = arn_parts[2].upper()
 
 
@@ -218,9 +217,9 @@ def lambda_handler(event, context):
 
 
         # =================================================
-        # USER AUTHORIZATION
+        # USER ACCESS
         #
-        # USER CAN ONLY READ
+        # USER = READ ONLY
         # =================================================
 
         if role == "USER":
@@ -256,22 +255,19 @@ def lambda_handler(event, context):
 
 
         # =================================================
-        # ADMIN AUTHORIZATION
+        # ADMIN ACCESS
         #
-        # ADMIN CAN READ AND MODIFY
+        # ADMIN = FULL PRODUCT CRUD
         # =================================================
 
         if role == "ADMIN":
 
             allowed_methods = {
-
                 "GET",
                 "POST",
                 "PUT",
                 "DELETE"
-
             }
-
 
             if http_method in allowed_methods:
 
