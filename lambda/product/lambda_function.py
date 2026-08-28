@@ -6,10 +6,12 @@ import pymysql
 
 
 # =========================================================
-# AWS SSM CLIENT
+# AWS CLIENTS
 # =========================================================
 
 ssm = boto3.client("ssm")
+
+events = boto3.client("events")
 
 
 # =========================================================
@@ -40,23 +42,33 @@ def get_database_credentials():
     prefix = f"/cloudmart/{environment}/db"
 
     return {
-        "host": get_parameter(
-            f"{prefix}/host"
-        ),
-        "port": int(
+
+        "host":
             get_parameter(
-                f"{prefix}/port"
+                f"{prefix}/host"
+            ),
+
+        "port":
+            int(
+                get_parameter(
+                    f"{prefix}/port"
+                )
+            ),
+
+        "database":
+            get_parameter(
+                f"{prefix}/name"
+            ),
+
+        "username":
+            get_parameter(
+                f"{prefix}/username"
+            ),
+
+        "password":
+            get_parameter(
+                f"{prefix}/password"
             )
-        ),
-        "database": get_parameter(
-            f"{prefix}/name"
-        ),
-        "username": get_parameter(
-            f"{prefix}/username"
-        ),
-        "password": get_parameter(
-            f"{prefix}/password"
-        )
     }
 
 
@@ -69,15 +81,119 @@ def get_connection():
     db = get_database_credentials()
 
     return pymysql.connect(
+
         host=db["host"],
+
         port=db["port"],
+
         user=db["username"],
+
         password=db["password"],
+
         database=db["database"],
+
         cursorclass=pymysql.cursors.DictCursor,
+
         connect_timeout=10,
+
         read_timeout=30,
+
         write_timeout=30
+    )
+
+
+# =========================================================
+# PUBLISH INVENTORY EVENT
+# =========================================================
+
+def publish_inventory_event(
+    product_id,
+    product_name,
+    quantity,
+    reorder_level
+):
+
+    event_bus_name = os.environ[
+        "EVENT_BUS_NAME"
+    ]
+
+    event_detail = {
+
+        "product_id":
+            product_id,
+
+        "product_name":
+            product_name,
+
+        "quantity":
+            quantity,
+
+        "reorder_level":
+            reorder_level
+    }
+
+    response = events.put_events(
+
+        Entries=[
+
+            {
+
+                "EventBusName":
+                    event_bus_name,
+
+                "Source":
+                    "cloudmart.product",
+
+                "DetailType":
+                    "InventoryUpdated",
+
+                "Detail":
+                    json.dumps(
+                        event_detail
+                    )
+            }
+        ]
+    )
+
+    if response["FailedEntryCount"] > 0:
+
+        print(
+            json.dumps({
+
+                "event":
+                    "inventory_event_publish_failed",
+
+                "product_id":
+                    product_id,
+
+                "response":
+                    response
+            })
+        )
+
+        raise RuntimeError(
+            "Failed to publish InventoryUpdated event"
+        )
+
+
+    print(
+        json.dumps({
+
+            "event":
+                "inventory_event_published",
+
+            "product_id":
+                product_id,
+
+            "quantity":
+                quantity,
+
+            "reorder_level":
+                reorder_level,
+
+            "status":
+                "success"
+        })
     )
 
 
@@ -85,17 +201,27 @@ def get_connection():
 # HTTP RESPONSE
 # =========================================================
 
-def create_response(status_code, body):
+def create_response(
+    status_code,
+    body
+):
 
     return {
-        "statusCode": status_code,
+
+        "statusCode":
+            status_code,
+
         "headers": {
-            "Content-Type": "application/json"
+
+            "Content-Type":
+                "application/json"
         },
-        "body": json.dumps(
-            body,
-            default=str
-        )
+
+        "body":
+            json.dumps(
+                body,
+                default=str
+            )
     }
 
 
@@ -103,7 +229,10 @@ def create_response(status_code, body):
 # LAMBDA HANDLER
 # =========================================================
 
-def lambda_handler(event, context):
+def lambda_handler(
+    event,
+    context
+):
 
     connection = None
 
@@ -111,29 +240,50 @@ def lambda_handler(event, context):
 
         print(
             json.dumps({
-                "event": "product_request_started"
+
+                "event":
+                    "product_request_started"
             })
         )
+
 
         # =================================================
         # GET HTTP METHOD
         # =================================================
 
-        http_method = event.get("httpMethod")
+        http_method = event.get(
+            "httpMethod"
+        )
 
-        # Support HTTP API payload format
+
         if not http_method:
 
             http_method = (
-                event.get("requestContext", {})
-                .get("http", {})
-                .get("method")
+
+                event.get(
+                    "requestContext",
+                    {}
+                )
+
+                .get(
+                    "http",
+                    {}
+                )
+
+                .get(
+                    "method"
+                )
             )
+
 
         print(
             json.dumps({
-                "event": "http_method",
-                "method": http_method
+
+                "event":
+                    "http_method",
+
+                "method":
+                    http_method
             })
         )
 
@@ -143,11 +293,17 @@ def lambda_handler(event, context):
         # =================================================
 
         path_parameters = (
-            event.get("pathParameters")
+
+            event.get(
+                "pathParameters"
+            )
+
             or {}
         )
 
-        product_id = path_parameters.get("id")
+        product_id = path_parameters.get(
+            "id"
+        )
 
 
         # =================================================
@@ -158,8 +314,12 @@ def lambda_handler(event, context):
 
         print(
             json.dumps({
-                "event": "rds_connection",
-                "status": "success"
+
+                "event":
+                    "rds_connection",
+
+                "status":
+                    "success"
             })
         )
 
@@ -173,12 +333,15 @@ def lambda_handler(event, context):
 
             # =============================================
             # GET ALL PRODUCTS
-            # GET /products
             # =============================================
 
-            if http_method == "GET" and not product_id:
+            if (
+                http_method == "GET"
+                and not product_id
+            ):
 
                 cursor.execute(
+
                     """
                     SELECT
                         product_id,
@@ -203,12 +366,15 @@ def lambda_handler(event, context):
 
             # =============================================
             # GET PRODUCT BY ID
-            # GET /products/{id}
             # =============================================
 
-            if http_method == "GET" and product_id:
+            if (
+                http_method == "GET"
+                and product_id
+            ):
 
                 cursor.execute(
+
                     """
                     SELECT
                         product_id,
@@ -221,6 +387,7 @@ def lambda_handler(event, context):
                     FROM products
                     WHERE product_id = %s
                     """,
+
                     (product_id,)
                 )
 
@@ -229,7 +396,9 @@ def lambda_handler(event, context):
                 if not product:
 
                     return create_response(
+
                         404,
+
                         {
                             "message":
                                 "Product not found"
@@ -244,7 +413,6 @@ def lambda_handler(event, context):
 
             # =============================================
             # CREATE PRODUCT
-            # POST /products
             # =============================================
 
             if http_method == "POST":
@@ -254,7 +422,9 @@ def lambda_handler(event, context):
                 if not body:
 
                     return create_response(
+
                         400,
+
                         {
                             "message":
                                 "Request body is required"
@@ -267,13 +437,17 @@ def lambda_handler(event, context):
                     body = json.loads(body)
 
 
-                name = body.get("name")
+                name = body.get(
+                    "name"
+                )
 
                 description = body.get(
                     "description"
                 )
 
-                price = body.get("price")
+                price = body.get(
+                    "price"
+                )
 
                 category = body.get(
                     "category"
@@ -283,7 +457,9 @@ def lambda_handler(event, context):
                 if not name:
 
                     return create_response(
+
                         400,
+
                         {
                             "message":
                                 "name is required"
@@ -294,7 +470,9 @@ def lambda_handler(event, context):
                 if price is None:
 
                     return create_response(
+
                         400,
+
                         {
                             "message":
                                 "price is required"
@@ -303,6 +481,7 @@ def lambda_handler(event, context):
 
 
                 cursor.execute(
+
                     """
                     INSERT INTO products
                     (
@@ -319,6 +498,7 @@ def lambda_handler(event, context):
                         %s
                     )
                     """,
+
                     (
                         name,
                         description,
@@ -330,13 +510,30 @@ def lambda_handler(event, context):
 
                 connection.commit()
 
-
                 new_product_id = cursor.lastrowid
 
 
+                print(
+                    json.dumps({
+
+                        "event":
+                            "product_created",
+
+                        "product_id":
+                            new_product_id,
+
+                        "status":
+                            "success"
+                    })
+                )
+
+
                 return create_response(
+
                     201,
+
                     {
+
                         "message":
                             "Product created successfully",
 
@@ -347,18 +544,22 @@ def lambda_handler(event, context):
 
 
             # =============================================
-            # UPDATE PRODUCT
-            # PUT /products/{id}
+            # UPDATE PRODUCT + INVENTORY
             # =============================================
 
-            if http_method == "PUT" and product_id:
+            if (
+                http_method == "PUT"
+                and product_id
+            ):
 
                 body = event.get("body")
 
                 if not body:
 
                     return create_response(
+
                         400,
+
                         {
                             "message":
                                 "Request body is required"
@@ -371,20 +572,33 @@ def lambda_handler(event, context):
                     body = json.loads(body)
 
 
-                name = body.get("name")
+                name = body.get(
+                    "name"
+                )
 
                 description = body.get(
                     "description"
                 )
 
-                price = body.get("price")
+                price = body.get(
+                    "price"
+                )
 
                 category = body.get(
                     "category"
                 )
 
+                quantity = body.get(
+                    "quantity"
+                )
+
+
+                # -----------------------------------------
+                # UPDATE PRODUCT
+                # -----------------------------------------
 
                 cursor.execute(
+
                     """
                     UPDATE products
                     SET
@@ -394,6 +608,7 @@ def lambda_handler(event, context):
                         category = %s
                     WHERE product_id = %s
                     """,
+
                     (
                         name,
                         description,
@@ -404,13 +619,14 @@ def lambda_handler(event, context):
                 )
 
 
-                connection.commit()
-
-
                 if cursor.rowcount == 0:
 
+                    connection.rollback()
+
                     return create_response(
+
                         404,
+
                         {
                             "message":
                                 "Product not found"
@@ -418,38 +634,202 @@ def lambda_handler(event, context):
                     )
 
 
+                inventory_event = None
+
+
+                # -----------------------------------------
+                # UPDATE INVENTORY
+                # -----------------------------------------
+
+                if quantity is not None:
+
+                    cursor.execute(
+
+                        """
+                        UPDATE inventory
+                        SET
+                            quantity = %s,
+                            updated_at =
+                                CURRENT_TIMESTAMP
+                        WHERE product_id = %s
+                        """,
+
+                        (
+                            quantity,
+                            product_id
+                        )
+                    )
+
+
+                    if cursor.rowcount == 0:
+
+                        connection.rollback()
+
+                        return create_response(
+
+                            404,
+
+                            {
+                                "message":
+                                    "Inventory record not found"
+                            }
+                        )
+
+
+                    # -------------------------------------
+                    # GET INVENTORY DETAILS
+                    # -------------------------------------
+
+                    cursor.execute(
+
+                        """
+                        SELECT
+                            p.name,
+                            i.quantity,
+                            i.reorder_level
+                        FROM products p
+                        JOIN inventory i
+                            ON p.product_id =
+                               i.product_id
+                        WHERE p.product_id = %s
+                        """,
+
+                        (product_id,)
+                    )
+
+
+                    inventory = cursor.fetchone()
+
+
+                    if not inventory:
+
+                        connection.rollback()
+
+                        return create_response(
+
+                            404,
+
+                            {
+                                "message":
+                                    "Inventory information not found"
+                            }
+                        )
+
+
+                    inventory_event = {
+
+                        "product_id":
+                            product_id,
+
+                        "product_name":
+                            inventory["name"],
+
+                        "quantity":
+                            inventory["quantity"],
+
+                        "reorder_level":
+                            inventory["reorder_level"]
+                    }
+
+
+                # -----------------------------------------
+                # COMMIT
+                # -----------------------------------------
+
+                connection.commit()
+
+
+                # -----------------------------------------
+                # PUBLISH EVENT
+                # -----------------------------------------
+
+                if inventory_event:
+
+                    publish_inventory_event(
+
+                        product_id=
+                            inventory_event[
+                                "product_id"
+                            ],
+
+                        product_name=
+                            inventory_event[
+                                "product_name"
+                            ],
+
+                        quantity=
+                            inventory_event[
+                                "quantity"
+                            ],
+
+                        reorder_level=
+                            inventory_event[
+                                "reorder_level"
+                            ]
+                    )
+
+
+                print(
+                    json.dumps({
+
+                        "event":
+                            "product_updated",
+
+                        "product_id":
+                            product_id,
+
+                        "inventory_updated":
+                            quantity is not None,
+
+                        "status":
+                            "success"
+                    })
+                )
+
+
                 return create_response(
+
                     200,
+
                     {
+
                         "message":
-                            "Product updated successfully"
+                            "Product updated successfully",
+
+                        "inventory_updated":
+                            quantity is not None
                     }
                 )
 
 
             # =============================================
             # DELETE PRODUCT
-            # DELETE /products/{id}
             # =============================================
 
-            if http_method == "DELETE" and product_id:
+            if (
+                http_method == "DELETE"
+                and product_id
+            ):
 
                 cursor.execute(
+
                     """
                     DELETE FROM products
                     WHERE product_id = %s
                     """,
+
                     (product_id,)
                 )
 
 
-                connection.commit()
-
-
                 if cursor.rowcount == 0:
 
+                    connection.rollback()
+
                     return create_response(
+
                         404,
+
                         {
                             "message":
                                 "Product not found"
@@ -457,9 +837,30 @@ def lambda_handler(event, context):
                     )
 
 
+                connection.commit()
+
+
+                print(
+                    json.dumps({
+
+                        "event":
+                            "product_deleted",
+
+                        "product_id":
+                            product_id,
+
+                        "status":
+                            "success"
+                    })
+                )
+
+
                 return create_response(
+
                     200,
+
                     {
+
                         "message":
                             "Product deleted successfully"
                     }
@@ -471,7 +872,9 @@ def lambda_handler(event, context):
             # =============================================
 
             return create_response(
+
                 405,
+
                 {
                     "message":
                         "Method not allowed"
@@ -485,8 +888,21 @@ def lambda_handler(event, context):
 
     except json.JSONDecodeError:
 
+        print(
+            json.dumps({
+
+                "event":
+                    "invalid_json",
+
+                "status":
+                    "failed"
+            })
+        )
+
         return create_response(
+
             400,
+
             {
                 "message":
                     "Invalid JSON body"
@@ -502,11 +918,15 @@ def lambda_handler(event, context):
 
         print(
             json.dumps({
+
                 "event":
                     "product_request_failed",
 
                 "error":
-                    str(error)
+                    str(error),
+
+                "status":
+                    "failed"
             })
         )
 
@@ -517,7 +937,9 @@ def lambda_handler(event, context):
 
 
         return create_response(
+
             500,
+
             {
                 "message":
                     "Internal server error"

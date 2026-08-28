@@ -62,7 +62,24 @@ jobs:
 
 
       # =================================================
-      # PREPARE PACKAGE
+      # VERIFY LAMBDA BUCKET
+      # =================================================
+
+      - name: Verify Lambda S3 bucket
+
+        run: |
+
+          echo "Checking Lambda S3 bucket..."
+
+          aws s3api head-bucket \
+            --bucket "$LAMBDA_BUCKET" \
+            --region "$AWS_REGION"
+
+          echo "Lambda S3 bucket exists."
+
+
+      # =================================================
+      # PREPARE PRODUCT PACKAGE
       # =================================================
 
       - name: Prepare Product Lambda package
@@ -99,7 +116,7 @@ jobs:
 
 
       # =================================================
-      # CREATE ZIP
+      # CREATE PRODUCT ZIP
       # =================================================
 
       - name: Create Product Lambda ZIP
@@ -114,18 +131,20 @@ jobs:
 
 
       # =================================================
-      # SET S3 KEY
+      # SET PRODUCT S3 KEY
       # =================================================
 
       - name: Set Lambda S3 key
 
         run: |
 
-          echo "LAMBDA_S3_KEY=product/product-${GITHUB_SHA}.zip" >> "$GITHUB_ENV"
+          echo \
+            "LAMBDA_S3_KEY=product/product-${GITHUB_SHA}.zip" \
+            >> "$GITHUB_ENV"
 
 
       # =================================================
-      # UPLOAD ZIP
+      # UPLOAD PRODUCT ZIP
       # =================================================
 
       - name: Upload Product Lambda package
@@ -139,10 +158,10 @@ jobs:
 
 
       # =================================================
-      # VERIFY S3
+      # VERIFY PRODUCT S3 PACKAGE
       # =================================================
 
-      - name: Verify S3 package
+      - name: Verify Product S3 package
 
         run: |
 
@@ -153,16 +172,109 @@ jobs:
 
 
       # =================================================
-      # VALIDATE TEMPLATE
+      # PREPARE INVENTORY ALERT PACKAGE
+      # =================================================
+
+      - name: Prepare Inventory Alert Lambda package
+
+        run: |
+
+          echo "Preparing Inventory Alert Lambda..."
+
+          rm -rf inventory-alert-package
+
+          mkdir inventory-alert-package
+
+
+      # =================================================
+      # COPY INVENTORY ALERT LAMBDA
+      # =================================================
+
+      - name: Copy Inventory Alert Lambda
+
+        run: |
+
+          cp lambda/inventory-alert/lambda_function.py \
+            inventory-alert-package/
+
+
+      # =================================================
+      # CREATE INVENTORY ALERT ZIP
+      # =================================================
+
+      - name: Create Inventory Alert Lambda ZIP
+
+        run: |
+
+          cd inventory-alert-package
+
+          zip -r \
+            "../inventory-alert-${GITHUB_SHA}.zip" \
+            .
+
+          cd ..
+
+
+      # =================================================
+      # SET INVENTORY ALERT S3 KEY
+      # =================================================
+
+      - name: Set Inventory Alert S3 key
+
+        run: |
+
+          echo \
+            "INVENTORY_ALERT_S3_KEY=inventory-alert/inventory-alert-${GITHUB_SHA}.zip" \
+            >> "$GITHUB_ENV"
+
+
+      # =================================================
+      # UPLOAD INVENTORY ALERT ZIP
+      # =================================================
+
+      - name: Upload Inventory Alert Lambda package
+
+        run: |
+
+          echo "Uploading Inventory Alert Lambda..."
+
+          aws s3 cp \
+            "inventory-alert-${GITHUB_SHA}.zip" \
+            "s3://${LAMBDA_BUCKET}/${INVENTORY_ALERT_S3_KEY}" \
+            --region "$AWS_REGION"
+
+
+      # =================================================
+      # VERIFY INVENTORY ALERT S3 PACKAGE
+      # =================================================
+
+      - name: Verify Inventory Alert S3 package
+
+        run: |
+
+          aws s3api head-object \
+            --bucket "$LAMBDA_BUCKET" \
+            --key "$INVENTORY_ALERT_S3_KEY" \
+            --region "$AWS_REGION"
+
+          echo "Inventory Alert Lambda package verified."
+
+
+      # =================================================
+      # VALIDATE CLOUDFORMATION TEMPLATE
       # =================================================
 
       - name: Validate API Stack
 
         run: |
 
+          echo "Validating API Stack..."
+
           aws cloudformation validate-template \
             --template-body file://cloudformation/api-stack.yaml \
             --region "$AWS_REGION"
+
+          echo "API Stack template is valid."
 
 
       # =================================================
@@ -182,9 +294,13 @@ jobs:
 
             echo "exists=true" >> "$GITHUB_OUTPUT"
 
+            echo "API Stack exists."
+
           else
 
             echo "exists=false" >> "$GITHUB_OUTPUT"
+
+            echo "API Stack does not exist."
 
           fi
 
@@ -207,6 +323,8 @@ jobs:
             --parameters \
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
               ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
+              ParameterKey=InventoryAlertLambdaS3Key,ParameterValue="$INVENTORY_ALERT_S3_KEY" \
+              ParameterKey=LowStockEmail,ParameterValue="${{ secrets.LOW_STOCK_EMAIL }}" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"
 
@@ -226,6 +344,8 @@ jobs:
           aws cloudformation wait stack-create-complete \
             --stack-name "$STACK_NAME" \
             --region "$AWS_REGION"
+
+          echo "API Stack created successfully."
 
 
       # =================================================
@@ -250,6 +370,8 @@ jobs:
             --parameters \
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
               ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
+              ParameterKey=InventoryAlertLambdaS3Key,ParameterValue="$INVENTORY_ALERT_S3_KEY" \
+              ParameterKey=LowStockEmail,ParameterValue="${{ secrets.LOW_STOCK_EMAIL }}" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"
 
@@ -266,10 +388,54 @@ jobs:
 
           CHANGE_SET_NAME="api-${GITHUB_SHA}"
 
-          aws cloudformation wait change-set-create-complete \
+          echo "Waiting for Change Set..."
+
+          if aws cloudformation wait \
+            change-set-create-complete \
             --stack-name "$STACK_NAME" \
             --change-set-name "$CHANGE_SET_NAME" \
-            --region "$AWS_REGION"
+            --region "$AWS_REGION"; then
+
+            echo "Change Set created successfully."
+
+          else
+
+            echo "=========================================="
+            echo "CHANGE SET CREATION FAILED"
+            echo "=========================================="
+
+            aws cloudformation describe-change-set \
+              --stack-name "$STACK_NAME" \
+              --change-set-name "$CHANGE_SET_NAME" \
+              --region "$AWS_REGION" \
+              --query "{Status:Status,StatusReason:StatusReason,ExecutionStatus:ExecutionStatus}" \
+              --output table
+
+            exit 1
+
+          fi
+
+
+      # =================================================
+      # DISPLAY CHANGE SET
+      # =================================================
+
+      - name: Display Change Set
+
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          CHANGE_SET_NAME="api-${GITHUB_SHA}"
+
+          echo "Changes that will be applied:"
+
+          aws cloudformation describe-change-set \
+            --stack-name "$STACK_NAME" \
+            --change-set-name "$CHANGE_SET_NAME" \
+            --region "$AWS_REGION" \
+            --query "Changes[*].ResourceChange.{Action:Action,LogicalResourceId:LogicalResourceId,ResourceType:ResourceType}" \
+            --output table
 
 
       # =================================================
@@ -283,6 +449,8 @@ jobs:
         run: |
 
           CHANGE_SET_NAME="api-${GITHUB_SHA}"
+
+          echo "Executing Change Set..."
 
           aws cloudformation execute-change-set \
             --stack-name "$STACK_NAME" \
@@ -300,9 +468,13 @@ jobs:
 
         run: |
 
+          echo "Waiting for API Stack update..."
+
           aws cloudformation wait stack-update-complete \
             --stack-name "$STACK_NAME" \
             --region "$AWS_REGION"
+
+          echo "API Stack updated successfully."
 
 
       # =================================================
@@ -321,12 +493,76 @@ jobs:
 
 
       # =================================================
+      # VERIFY INVENTORY ALERT LAMBDA
+      # =================================================
+
+      - name: Verify Inventory Alert Lambda
+
+        run: |
+
+          aws lambda get-function \
+            --function-name CloudMart-dev-InventoryAlert \
+            --region "$AWS_REGION" \
+            --query "Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler}" \
+            --output table
+
+
+      # =================================================
+      # VERIFY EVENTBRIDGE EVENT BUS
+      # =================================================
+
+      - name: Verify EventBridge Event Bus
+
+        run: |
+
+          aws events describe-event-bus \
+            --name "CloudMart-${ENVIRONMENT}-EventBus" \
+            --region "$AWS_REGION" \
+            --query "{Name:Name,Arn:Arn}" \
+            --output table
+
+
+      # =================================================
+      # VERIFY EVENTBRIDGE RULE
+      # =================================================
+
+      - name: Verify EventBridge Rule
+
+        run: |
+
+          aws events describe-rule \
+            --name "CloudMart-${ENVIRONMENT}-InventoryChangedRule" \
+            --event-bus-name "CloudMart-${ENVIRONMENT}-EventBus" \
+            --region "$AWS_REGION" \
+            --query "{Name:Name,State:State,EventBusName:EventBusName}" \
+            --output table
+
+
+      # =================================================
+      # VERIFY SNS TOPIC
+      # =================================================
+
+      - name: Verify SNS Topic
+
+        run: |
+
+          aws sns get-topic-attributes \
+            --topic-arn \
+              "arn:aws:sns:${AWS_REGION}:${{ secrets.AWS_ACCOUNT_ID }}:CloudMart-${ENVIRONMENT}-LowStockTopic" \
+            --region "$AWS_REGION" \
+            --query "Attributes.{TopicArn:TopicArn}" \
+            --output table
+
+
+      # =================================================
       # DISPLAY API URL
       # =================================================
 
       - name: Display API URL
 
         run: |
+
+          echo "CloudMart API Outputs:"
 
           aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \

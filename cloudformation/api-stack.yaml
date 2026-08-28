@@ -21,8 +21,24 @@ Parameters:
       - dev
       - test
       - prod
+    
 
     Description: Deployment environment
+  
+  InventoryAlertLambdaS3Key:
+    Type: String
+    Default: inventory-alert/inventory-alert.zip
+
+    Description: 
+      S3 key containing the Inventory Alert Lambda package.
+
+
+  LowStockEmail:
+    Type: String
+
+    Description: 
+      Email address for CloudMart low-stock alerts.
+  
 
 
   LambdaS3Key:
@@ -38,7 +54,156 @@ Parameters:
 # =========================================================
 
 Resources:
+  
+  # =======================================================
+  # EVENTBRIDGE EVENT BUS
+  # =======================================================
 
+  CloudMartEventBus:
+
+    Type: AWS::Events::EventBus
+
+    Properties:
+
+      Name:
+        !Sub CloudMart-${Environment}-EventBus
+
+  # =======================================================
+  # SNS LOW STOCK TOPIC
+  # =======================================================
+
+  LowStockTopic:
+
+    Type: AWS::SNS::Topic
+
+    Properties:
+
+      TopicName:
+        !Sub CloudMart-${Environment}-LowStockTopic
+
+      DisplayName:
+        !Sub CloudMart ${Environment} Low Stock Alerts
+
+  # =======================================================
+  # SNS EMAIL SUBSCRIPTION
+  # =======================================================
+
+  LowStockEmailSubscription:
+
+    Type: AWS::SNS::Subscription
+
+    Properties:
+
+      TopicArn:
+        !Ref LowStockTopic
+
+      Protocol:
+        email
+
+      Endpoint:
+        !Ref LowStockEmail
+
+  # =======================================================
+  # INVENTORY ALERT LAMBDA
+  # =======================================================
+
+  InventoryAlertLambda:
+
+    Type: AWS::Lambda::Function
+
+    Properties:
+
+      FunctionName:
+        !Sub CloudMart-${Environment}-InventoryAlert
+
+      Runtime: python3.12
+
+      Handler: lambda_function.lambda_handler
+
+      MemorySize: 128
+
+      Timeout: 30
+
+      Role:
+        Fn::ImportValue:
+          !Sub CloudMart-${Environment}-InventoryAlertLambdaRoleArn
+
+      Environment:
+
+        Variables:
+
+          SNS_TOPIC_ARN:
+            !Ref LowStockTopic
+
+      Code:
+
+        S3Bucket:
+
+          Fn::ImportValue:
+            !Sub CloudMart-${Environment}-LambdaBucket
+
+        S3Key:
+          !Ref InventoryAlertLambdaS3Key
+
+
+    # =======================================================
+  # EVENTBRIDGE INVENTORY UPDATED RULE
+  # =======================================================
+
+  InventoryChangedRule:
+
+    Type: AWS::Events::Rule
+
+    Properties:
+
+      Name:
+        !Sub CloudMart-${Environment}-InventoryChangedRule
+
+      EventBusName:
+        !Ref CloudMartEventBus
+
+      State:
+        ENABLED
+
+      EventPattern:
+
+        source:
+
+          - cloudmart.product
+
+        detail-type:
+
+          - InventoryUpdated
+
+      Targets:
+
+        - Id:
+            InventoryAlertLambdaTarget
+
+          Arn:
+            !GetAtt InventoryAlertLambda.Arn
+
+    # =======================================================
+  # EVENTBRIDGE → INVENTORY ALERT LAMBDA PERMISSION
+  # =======================================================
+
+  InventoryAlertLambdaPermission:
+
+    Type: AWS::Lambda::Permission
+
+    Properties:
+
+      FunctionName:
+        !Ref InventoryAlertLambda
+
+      Action:
+        lambda:InvokeFunction
+
+      Principal:
+        events.amazonaws.com
+
+      SourceArn:
+        !GetAtt InventoryChangedRule.Arn
 
   # =======================================================
   # PRODUCT LAMBDA
@@ -76,6 +241,8 @@ Resources:
 
           ENVIRONMENT:
             !Ref Environment
+          EVENT_BUS_NAME:
+            !Ref CloudMartEventBus
 
 
       # ---------------------------------------------------
@@ -487,3 +654,71 @@ Outputs:
     Export:
       Name:
         !Sub CloudMart-${Environment}-ProductLambdaName
+
+
+  # =======================================================
+  # EVENT BUS ARN
+  # =======================================================
+
+  EventBusArn:
+
+    Description:
+      CloudMart EventBridge Event Bus ARN
+
+    Value:
+      !GetAtt CloudMartEventBus.Arn
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-EventBusArn
+
+
+  # =======================================================
+  # EVENT BUS NAME
+  # =======================================================
+
+  EventBusName:
+
+    Description:
+      CloudMart EventBridge Event Bus Name
+
+    Value:
+      !Ref CloudMartEventBus
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-EventBusName
+
+
+  # =======================================================
+  # INVENTORY ALERT LAMBDA ARN
+  # =======================================================
+
+  InventoryAlertLambdaArn:
+
+    Description:
+      Inventory Alert Lambda ARN
+
+    Value:
+      !GetAtt InventoryAlertLambda.Arn
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-InventoryAlertLambdaArn
+
+
+  # =======================================================
+  # LOW STOCK SNS TOPIC ARN
+  # =======================================================
+
+  LowStockTopicArn:
+
+    Description:
+      Low Stock SNS Topic ARN
+
+    Value:
+      !Ref LowStockTopic
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-LowStockTopicArn
