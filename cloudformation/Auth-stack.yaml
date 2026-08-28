@@ -2,9 +2,9 @@ AWSTemplateFormatVersion: '2010-09-09'
 
 Description: >
   CloudMart Authentication Stack.
-  Creates the Lambda Authorizer used by API Gateway.
-  The expected authentication token is stored in
-  AWS Systems Manager Parameter Store as a SecureString.
+  Creates USER and ADMIN authentication tokens
+  in SSM Parameter Store and a Lambda Authorizer
+  for API Gateway.
 
 
 # =========================================================
@@ -25,22 +25,31 @@ Parameters:
     Description: Deployment environment
 
 
-  TokenParameterName:
+  UserToken:
     Type: String
-    Default: /cloudmart/dev/auth/token
+    NoEcho: true
 
     Description: >
-      SSM Parameter Store path containing the
-      CloudMart authentication token.
+      Authentication token for USER role.
+      Supplied securely through GitHub Actions.
+
+
+  AdminToken:
+    Type: String
+    NoEcho: true
+
+    Description: >
+      Authentication token for ADMIN role.
+      Supplied securely through GitHub Actions.
 
 
   LambdaS3Key:
     Type: String
+
     Default: authorizer/authorizer.zip
 
     Description: >
-      S3 key containing the Authorizer Lambda
-      deployment package.
+      S3 key containing the Authorizer Lambda package.
 
 
 # =========================================================
@@ -51,16 +60,62 @@ Resources:
 
 
   # =======================================================
+  # USER TOKEN - SSM SECURE STRING
+  # =======================================================
+
+  UserTokenParameter:
+
+    Type: AWS::SSM::Parameter
+
+    Properties:
+
+      Name:
+        !Sub /cloudmart/${Environment}/auth/user-token
+
+      Type: SecureString
+
+      Value:
+        !Ref UserToken
+
+      Description:
+        !Sub CloudMart ${Environment} USER authentication token
+
+
+  # =======================================================
+  # ADMIN TOKEN - SSM SECURE STRING
+  # =======================================================
+
+  AdminTokenParameter:
+
+    Type: AWS::SSM::Parameter
+
+    Properties:
+
+      Name:
+        !Sub /cloudmart/${Environment}/auth/admin-token
+
+      Type: SecureString
+
+      Value:
+        !Ref AdminToken
+
+      Description:
+        !Sub CloudMart ${Environment} ADMIN authentication token
+
+
+  # =======================================================
   # AUTHORIZER IAM ROLE
   # =======================================================
 
   AuthorizerExecutionRole:
+
     Type: AWS::IAM::Role
 
     Properties:
 
       RoleName:
         !Sub CloudMart-${Environment}-AuthorizerRole
+
 
       AssumeRolePolicyDocument:
 
@@ -71,6 +126,7 @@ Resources:
           - Effect: Allow
 
             Principal:
+
               Service:
                 - lambda.amazonaws.com
 
@@ -80,8 +136,9 @@ Resources:
 
       Policies:
 
+
         # -------------------------------------------------
-        # CLOUDWATCH LOGS
+        # CLOUDWATCH LOGGING
         # -------------------------------------------------
 
         - PolicyName:
@@ -102,6 +159,7 @@ Resources:
                   - logs:PutLogEvents
 
                 Resource:
+
                   - !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:*
 
 
@@ -125,7 +183,9 @@ Resources:
                   - ssm:GetParameter
 
                 Resource:
-                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TokenParameterName}
+
+                  - !GetAtt UserTokenParameter.Arn
+                  - !GetAtt AdminTokenParameter.Arn
 
 
   # =======================================================
@@ -133,6 +193,7 @@ Resources:
   # =======================================================
 
   AuthorizerLambda:
+
     Type: AWS::Lambda::Function
 
     Properties:
@@ -151,32 +212,43 @@ Resources:
 
       MemorySize: 128
 
+
+      # ---------------------------------------------------
+      # ENVIRONMENT VARIABLES
+      # ---------------------------------------------------
+
       Environment:
 
         Variables:
 
-          TOKEN_PARAMETER:
-            !Ref TokenParameterName
+          USER_TOKEN_PARAMETER:
+            !Ref UserTokenParameter
+
+          ADMIN_TOKEN_PARAMETER:
+            !Ref AdminTokenParameter
+
+
+      # ---------------------------------------------------
+      # LAMBDA PACKAGE
+      # ---------------------------------------------------
 
       Code:
 
         S3Bucket:
+
           Fn::ImportValue:
             !Sub CloudMart-${Environment}-LambdaBucket
 
-        # Versioned S3 object supplied by GitHub Actions
         S3Key:
           !Ref LambdaS3Key
 
 
   # =======================================================
-  # API GATEWAY PERMISSION
-  # =======================================================
-  #
-  # Allows API Gateway to invoke the Authorizer Lambda.
+  # API GATEWAY INVOKE PERMISSION
   # =======================================================
 
   AuthorizerInvokePermission:
+
     Type: AWS::Lambda::Permission
 
     Properties:
@@ -199,7 +271,33 @@ Outputs:
 
 
   # =======================================================
-  # AUTHORIZER LAMBDA ARN
+  # USER TOKEN PARAMETER
+  # =======================================================
+
+  UserTokenParameterName:
+
+    Description:
+      USER token SSM parameter name
+
+    Value:
+      !Ref UserTokenParameter
+
+
+  # =======================================================
+  # ADMIN TOKEN PARAMETER
+  # =======================================================
+
+  AdminTokenParameterName:
+
+    Description:
+      ADMIN token SSM parameter name
+
+    Value:
+      !Ref AdminTokenParameter
+
+
+  # =======================================================
+  # AUTHORIZE LAMBDA ARN
   # =======================================================
 
   AuthorizerLambdaArn:
@@ -211,12 +309,13 @@ Outputs:
       !GetAtt AuthorizerLambda.Arn
 
     Export:
+
       Name:
         !Sub CloudMart-${Environment}-AuthorizerLambdaArn
 
 
   # =======================================================
-  # AUTHORIZER LAMBDA NAME
+  # AUTHORIZE LAMBDA NAME
   # =======================================================
 
   AuthorizerLambdaName:
@@ -228,22 +327,24 @@ Outputs:
       !Ref AuthorizerLambda
 
     Export:
+
       Name:
         !Sub CloudMart-${Environment}-AuthorizerLambdaName
 
 
   # =======================================================
-  # AUTHORIZER ROLE ARN
+  # AUTHORIZE ROLE ARN
   # =======================================================
 
   AuthorizerRoleArn:
 
     Description:
-      CloudMart Authorizer IAM role ARN
+      CloudMart Authorizer IAM Role ARN
 
     Value:
       !GetAtt AuthorizerExecutionRole.Arn
 
     Export:
+
       Name:
         !Sub CloudMart-${Environment}-AuthorizerRoleArn
