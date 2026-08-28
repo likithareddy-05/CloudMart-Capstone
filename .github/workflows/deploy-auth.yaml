@@ -8,13 +8,14 @@ permissions:
   contents: read
 
 env:
-
   AWS_REGION: ap-south-1
   ENVIRONMENT: dev
   STACK_NAME: cloudmart-dev-auth
 
-  LAMBDA_BUCKET: cloudmart-dev-lambda-430155298316
-
+  # IMPORTANT:
+  # This must be the actual S3 bucket that stores
+  # your Lambda deployment packages.
+  LAMBDA_BUCKET: cloudmart-dev-Productlambda-430155298316
 
 jobs:
 
@@ -24,18 +25,18 @@ jobs:
 
     steps:
 
-      # ===================================================
-      # 1. CHECKOUT REPOSITORY
-      # ===================================================
+      # ==================================================
+      # 1. CHECKOUT
+      # ==================================================
 
       - name: Checkout repository
 
         uses: actions/checkout@v4
 
 
-      # ===================================================
-      # 2. CONFIGURE AWS CREDENTIALS
-      # ===================================================
+      # ==================================================
+      # 2. CONFIGURE AWS
+      # ==================================================
 
       - name: Configure AWS credentials
 
@@ -48,48 +49,73 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
 
-      # ===================================================
-      # 3. VERIFY AWS ACCESS
-      # ===================================================
+      # ==================================================
+      # 3. VERIFY AWS
+      # ==================================================
 
       - name: Verify AWS identity
 
         run: |
 
+          echo "Checking AWS identity..."
+
           aws sts get-caller-identity
 
 
-      # ===================================================
-      # 4. PREPARE LAMBDA PACKAGE
-      # ===================================================
+      # ==================================================
+      # 4. CHECK LAMBDA BUCKET
+      # ==================================================
+
+      - name: Verify Lambda S3 bucket
+
+        run: |
+
+          echo "Checking Lambda S3 bucket..."
+
+          aws s3api head-bucket \
+            --bucket "$LAMBDA_BUCKET" \
+            --region "$AWS_REGION"
+
+          echo "Lambda bucket exists."
+
+
+      # ==================================================
+      # 5. PREPARE PACKAGE
+      # ==================================================
 
       - name: Prepare Authorizer package
 
         run: |
+
+          echo "Preparing Authorizer package..."
 
           rm -rf package
 
           mkdir package
 
 
-      # ===================================================
-      # 5. COPY AUTHORIZER CODE
-      # ===================================================
+      # ==================================================
+      # 6. COPY PYTHON CODE
+      # ==================================================
 
       - name: Copy Authorizer Lambda code
 
         run: |
 
+          echo "Copying Authorizer Lambda code..."
+
           cp lambda/authorizer/lambda_function.py package/
 
 
-      # ===================================================
-      # 6. CREATE VERSIONED ZIP
-      # ===================================================
+      # ==================================================
+      # 7. CREATE VERSIONED ZIP
+      # ==================================================
 
       - name: Create Authorizer ZIP
 
         run: |
+
+          echo "Creating versioned Authorizer ZIP..."
 
           cd package
 
@@ -98,22 +124,22 @@ jobs:
           cd ..
 
 
-      # ===================================================
-      # 7. VERIFY ZIP
-      # ===================================================
+      # ==================================================
+      # 8. VERIFY ZIP
+      # ==================================================
 
-      - name: Verify Authorizer package
+      - name: Verify Authorizer ZIP
 
         run: |
 
-          echo "ZIP CONTENTS:"
+          echo "Authorizer ZIP contents:"
 
           unzip -l "authorizer-${GITHUB_SHA}.zip"
 
 
-      # ===================================================
-      # 8. SET VERSIONED S3 KEY
-      # ===================================================
+      # ==================================================
+      # 9. SET S3 KEY
+      # ==================================================
 
       - name: Set Lambda S3 key
 
@@ -125,11 +151,11 @@ jobs:
           echo "authorizer/authorizer-${GITHUB_SHA}.zip"
 
 
-      # ===================================================
-      # 9. UPLOAD ZIP TO S3
-      # ===================================================
+      # ==================================================
+      # 10. UPLOAD ZIP TO S3
+      # ==================================================
 
-      - name: Upload Authorizer package to S3
+      - name: Upload Authorizer package
 
         run: |
 
@@ -140,34 +166,36 @@ jobs:
             "s3://${LAMBDA_BUCKET}/${LAMBDA_S3_KEY}" \
             --region "$AWS_REGION"
 
+          echo "Authorizer package uploaded successfully."
 
-      # ===================================================
-      # 10. VERIFY S3 OBJECT
-      # ===================================================
 
-      - name: Verify S3 package
+      # ==================================================
+      # 11. VERIFY S3 OBJECT
+      # ==================================================
+
+      - name: Verify S3 object
 
         run: |
 
-          echo "Checking uploaded package..."
+          echo "Checking uploaded Authorizer package..."
 
           aws s3api head-object \
             --bucket "$LAMBDA_BUCKET" \
             --key "$LAMBDA_S3_KEY" \
             --region "$AWS_REGION"
 
-          echo "S3 package verified successfully."
+          echo "S3 object verified successfully."
 
 
-      # ===================================================
-      # 11. VALIDATE CLOUDFORMATION TEMPLATE
-      # ===================================================
+      # ==================================================
+      # 12. VALIDATE CLOUDFORMATION
+      # ==================================================
 
       - name: Validate Auth Stack
 
         run: |
 
-          echo "Validating Auth Stack..."
+          echo "Validating Auth CloudFormation template..."
 
           aws cloudformation validate-template \
             --template-body file://cloudformation/Auth-stack.yaml \
@@ -176,15 +204,34 @@ jobs:
           echo "CloudFormation template is valid."
 
 
-      # ===================================================
-      # 12. CHECK WHETHER STACK EXISTS
-      # ===================================================
+      # ==================================================
+      # 13. VERIFY TEMPLATE PARAMETERS
+      # ==================================================
+
+      - name: Verify Auth template parameters
+
+        run: |
+
+          echo "Checking CloudFormation parameters..."
+
+          aws cloudformation validate-template \
+            --template-body file://cloudformation/Auth-stack.yaml \
+            --region "$AWS_REGION" \
+            --query "Parameters[*].ParameterKey" \
+            --output table
+
+
+      # ==================================================
+      # 14. CHECK STACK
+      # ==================================================
 
       - name: Check Auth Stack
 
         id: stack
 
         run: |
+
+          echo "Checking whether Auth Stack exists..."
 
           if aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
@@ -193,20 +240,20 @@ jobs:
 
             echo "exists=true" >> "$GITHUB_OUTPUT"
 
-            echo "Auth stack exists."
+            echo "Auth Stack already exists."
 
           else
 
             echo "exists=false" >> "$GITHUB_OUTPUT"
 
-            echo "Auth stack does not exist."
+            echo "Auth Stack does not exist."
 
           fi
 
 
-      # ===================================================
-      # 13. CREATE AUTH STACK
-      # ===================================================
+      # ==================================================
+      # 15. CREATE STACK
+      # ==================================================
 
       - name: Create Auth Stack
 
@@ -228,9 +275,9 @@ jobs:
             --region "$AWS_REGION"
 
 
-      # ===================================================
-      # 14. WAIT FOR STACK CREATION
-      # ===================================================
+      # ==================================================
+      # 16. WAIT FOR STACK CREATION
+      # ==================================================
 
       - name: Wait for Auth Stack creation
 
@@ -238,7 +285,7 @@ jobs:
 
         run: |
 
-          echo "Waiting for Auth Stack..."
+          echo "Waiting for Auth Stack creation..."
 
           aws cloudformation wait stack-create-complete \
             --stack-name "$STACK_NAME" \
@@ -247,9 +294,9 @@ jobs:
           echo "Auth Stack created successfully."
 
 
-      # ===================================================
-      # 15. CREATE CHANGE SET
-      # ===================================================
+      # ==================================================
+      # 17. CREATE CHANGE SET
+      # ==================================================
 
       - name: Create Auth Change Set
 
@@ -276,9 +323,9 @@ jobs:
             --region "$AWS_REGION"
 
 
-      # ===================================================
-      # 16. WAIT FOR CHANGE SET
-      # ===================================================
+      # ==================================================
+      # 18. WAIT FOR CHANGE SET
+      # ==================================================
 
       - name: Wait for Auth Change Set
 
@@ -290,17 +337,45 @@ jobs:
 
           echo "Waiting for Change Set..."
 
-          aws cloudformation wait change-set-create-complete \
+          if aws cloudformation wait change-set-create-complete \
             --stack-name "$STACK_NAME" \
             --change-set-name "$CHANGE_SET_NAME" \
-            --region "$AWS_REGION"
+            --region "$AWS_REGION"; then
 
-          echo "Change Set created successfully."
+            echo "Change Set created successfully."
+
+          else
+
+            echo "=========================================="
+            echo "CHANGE SET CREATION FAILED"
+            echo "=========================================="
+
+            echo "Getting Change Set details..."
+
+            aws cloudformation describe-change-set \
+              --stack-name "$STACK_NAME" \
+              --change-set-name "$CHANGE_SET_NAME" \
+              --region "$AWS_REGION" \
+              --query "{Status:Status,StatusReason:StatusReason,ExecutionStatus:ExecutionStatus}" \
+              --output table
+
+            echo "=========================================="
+            echo "FULL CHANGE SET DETAILS"
+            echo "=========================================="
+
+            aws cloudformation describe-change-set \
+              --stack-name "$STACK_NAME" \
+              --change-set-name "$CHANGE_SET_NAME" \
+              --region "$AWS_REGION"
+
+            exit 1
+
+          fi
 
 
-      # ===================================================
-      # 17. DISPLAY CHANGE SET
-      # ===================================================
+      # ==================================================
+      # 19. DISPLAY CHANGE SET
+      # ==================================================
 
       - name: Display Auth Change Set
 
@@ -310,6 +385,8 @@ jobs:
 
           CHANGE_SET_NAME="auth-${GITHUB_SHA}"
 
+          echo "Change Set details:"
+
           aws cloudformation describe-change-set \
             --stack-name "$STACK_NAME" \
             --change-set-name "$CHANGE_SET_NAME" \
@@ -318,9 +395,9 @@ jobs:
             --output table
 
 
-      # ===================================================
-      # 18. EXECUTE CHANGE SET
-      # ===================================================
+      # ==================================================
+      # 20. EXECUTE CHANGE SET
+      # ==================================================
 
       - name: Execute Auth Change Set
 
@@ -337,10 +414,12 @@ jobs:
             --change-set-name "$CHANGE_SET_NAME" \
             --region "$AWS_REGION"
 
+          echo "Change Set execution started."
 
-      # ===================================================
-      # 19. WAIT FOR STACK UPDATE
-      # ===================================================
+
+      # ==================================================
+      # 21. WAIT FOR STACK UPDATE
+      # ==================================================
 
       - name: Wait for Auth Stack update
 
@@ -357,9 +436,26 @@ jobs:
           echo "Auth Stack updated successfully."
 
 
-      # ===================================================
-      # 20. VERIFY LAMBDA
-      # ===================================================
+      # ==================================================
+      # 22. VERIFY STACK STATUS
+      # ==================================================
+
+      - name: Verify Auth Stack status
+
+        run: |
+
+          echo "Auth Stack status:"
+
+          aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].StackStatus" \
+            --output text
+
+
+      # ==================================================
+      # 23. VERIFY AUTHORZIER LAMBDA
+      # ==================================================
 
       - name: Verify Authorizer Lambda
 
@@ -367,16 +463,22 @@ jobs:
 
           echo "Checking Authorizer Lambda..."
 
-          aws lambda get-function \
+          aws lambda get-function-configuration \
             --function-name CloudMart-dev-Authorizer \
             --region "$AWS_REGION" \
-            --query "Configuration.{FunctionName:FunctionName,Runtime:Runtime,Handler:Handler,LastModified:LastModified,CodeSha256:CodeSha256}" \
+            --query "{
+              FunctionName:FunctionName,
+              Runtime:Runtime,
+              Handler:Handler,
+              State:State,
+              LastModified:LastModified
+            }" \
             --output table
 
 
-      # ===================================================
-      # 21. VERIFY USER TOKEN PARAMETER
-      # ===================================================
+      # ==================================================
+      # 24. VERIFY USER SSM PARAMETER
+      # ==================================================
 
       - name: Verify USER SSM parameter
 
@@ -388,13 +490,13 @@ jobs:
             --name "/cloudmart/${ENVIRONMENT}/auth/user-token" \
             --with-decryption false \
             --region "$AWS_REGION" \
-            --query "Parameter.Name" \
-            --output text
+            --query "Parameter.{Name:Name,Type:Type}" \
+            --output table
 
 
-      # ===================================================
-      # 22. VERIFY ADMIN TOKEN PARAMETER
-      # ===================================================
+      # ==================================================
+      # 25. VERIFY ADMIN SSM PARAMETER
+      # ==================================================
 
       - name: Verify ADMIN SSM parameter
 
@@ -406,13 +508,13 @@ jobs:
             --name "/cloudmart/${ENVIRONMENT}/auth/admin-token" \
             --with-decryption false \
             --region "$AWS_REGION" \
-            --query "Parameter.Name" \
-            --output text
+            --query "Parameter.{Name:Name,Type:Type}" \
+            --output table
 
 
-      # ===================================================
-      # 23. DISPLAY STACK OUTPUTS
-      # ===================================================
+      # ==================================================
+      # 26. DISPLAY STACK OUTPUTS
+      # ==================================================
 
       - name: Display Auth Stack outputs
 
