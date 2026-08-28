@@ -4,10 +4,83 @@ import boto3
 import hmac
 
 
+# =========================================================
+# AWS CLIENT
+# =========================================================
+
 ssm = boto3.client("ssm")
 
-TOKEN_PARAMETER = os.environ["TOKEN_PARAMETER"]
 
+# =========================================================
+# ENVIRONMENT VARIABLES
+# =========================================================
+
+USER_TOKEN_PARAMETER = os.environ[
+    "USER_TOKEN_PARAMETER"
+]
+
+ADMIN_TOKEN_PARAMETER = os.environ[
+    "ADMIN_TOKEN_PARAMETER"
+]
+
+
+# =========================================================
+# GET TOKEN FROM SSM
+# =========================================================
+
+def get_token(parameter_name):
+
+    response = ssm.get_parameter(
+        Name=parameter_name,
+        WithDecryption=True
+    )
+
+    return response["Parameter"]["Value"]
+
+
+# =========================================================
+# CREATE IAM POLICY
+# =========================================================
+
+def create_policy(
+    principal_id,
+    effect,
+    resource,
+    role
+):
+
+    return {
+
+        "principalId": principal_id,
+
+        "policyDocument": {
+
+            "Version": "2012-10-17",
+
+            "Statement": [
+
+                {
+                    "Action": "execute-api:Invoke",
+
+                    "Effect": effect,
+
+                    "Resource": resource
+                }
+
+            ]
+        },
+
+        "context": {
+
+            "role": role
+
+        }
+    }
+
+
+# =========================================================
+# LAMBDA HANDLER
+# =========================================================
 
 def lambda_handler(event, context):
 
@@ -17,7 +90,9 @@ def lambda_handler(event, context):
         # GET AUTHORIZATION TOKEN
         # =================================================
 
-        authorization = event.get("authorizationToken")
+        authorization = event.get(
+            "authorizationToken"
+        )
 
         if not authorization:
 
@@ -33,9 +108,15 @@ def lambda_handler(event, context):
         # VALIDATE BEARER TOKEN FORMAT
         # =================================================
 
-        parts = authorization.split(" ", 1)
+        parts = authorization.split(
+            " ",
+            1
+        )
 
-        if len(parts) != 2 or parts[0].lower() != "bearer":
+        if (
+            len(parts) != 2
+            or parts[0].lower() != "bearer"
+        ):
 
             print(json.dumps({
                 "event": "authorization_failed",
@@ -45,78 +126,193 @@ def lambda_handler(event, context):
             raise Exception("Unauthorized")
 
 
-        provided_token = parts[1]
+        provided_token = parts[1].strip()
 
-
-        # =================================================
-        # GET EXPECTED TOKEN FROM SSM
-        # =================================================
-
-        response = ssm.get_parameter(
-            Name=TOKEN_PARAMETER,
-            WithDecryption=True
-        )
-
-        expected_token = response["Parameter"]["Value"]
-
-
-        # =================================================
-        # COMPARE TOKENS
-        # =================================================
-
-        if not hmac.compare_digest(
-            provided_token,
-            expected_token
-        ):
-
-            print(json.dumps({
-                "event": "authorization_failed",
-                "reason": "invalid_token"
-            }))
+        if not provided_token:
 
             raise Exception("Unauthorized")
 
 
         # =================================================
-        # AUTHORIZATION SUCCESS
+        # GET METHOD ARN
         # =================================================
 
-        print(json.dumps({
-            "event": "authorization_success"
-        }))
+        method_arn = event.get(
+            "methodArn"
+        )
+
+        if not method_arn:
+
+            raise Exception(
+                "Missing methodArn"
+            )
 
 
         # =================================================
-        # CREATE IAM POLICY
+        # EXTRACT HTTP METHOD
         # =================================================
 
-        method_arn = event.get("methodArn", "*")
+        arn_parts = method_arn.split("/")
 
-        policy = {
+        if len(arn_parts) < 3:
 
-            "principalId": "cloudmart-user",
+            raise Exception(
+                "Invalid methodArn"
+            )
 
-            "policyDocument": {
 
-                "Version": "2012-10-17",
+        http_method = arn_parts[2].upper()
 
-                "Statement": [
 
-                    {
-                        "Action": "execute-api:Invoke",
+        # =================================================
+        # GET USER TOKEN
+        # =================================================
 
-                        "Effect": "Allow",
+        user_token = get_token(
+            USER_TOKEN_PARAMETER
+        )
 
-                        "Resource": method_arn
-                    }
 
-                ]
+        # =================================================
+        # CHECK USER TOKEN
+        # =================================================
+
+        if hmac.compare_digest(
+            provided_token,
+            user_token
+        ):
+
+            role = "USER"
+
+
+        else:
+
+            # =============================================
+            # GET ADMIN TOKEN
+            # =============================================
+
+            admin_token = get_token(
+                ADMIN_TOKEN_PARAMETER
+            )
+
+
+            # =============================================
+            # CHECK ADMIN TOKEN
+            # =============================================
+
+            if hmac.compare_digest(
+                provided_token,
+                admin_token
+            ):
+
+                role = "ADMIN"
+
+            else:
+
+                print(json.dumps({
+                    "event": "authorization_failed",
+                    "reason": "invalid_token"
+                }))
+
+                raise Exception("Unauthorized")
+
+
+        # =================================================
+        # USER AUTHORIZATION
+        #
+        # USER CAN ONLY READ
+        # =================================================
+
+        if role == "USER":
+
+            if http_method == "GET":
+
+                print(json.dumps({
+                    "event": "authorization_success",
+                    "role": "USER",
+                    "method": http_method
+                }))
+
+                return create_policy(
+                    "cloudmart-user",
+                    "Allow",
+                    method_arn,
+                    "USER"
+                )
+
+
+            print(json.dumps({
+                "event": "authorization_denied",
+                "role": "USER",
+                "method": http_method
+            }))
+
+            return create_policy(
+                "cloudmart-user",
+                "Deny",
+                method_arn,
+                "USER"
+            )
+
+
+        # =================================================
+        # ADMIN AUTHORIZATION
+        #
+        # ADMIN CAN READ AND MODIFY
+        # =================================================
+
+        if role == "ADMIN":
+
+            allowed_methods = {
+
+                "GET",
+                "POST",
+                "PUT",
+                "DELETE"
+
             }
-        }
 
 
-        return policy
+            if http_method in allowed_methods:
 
+                print(json.dumps({
+                    "event": "authorization_success",
+                    "role": "ADMIN",
+                    "method": http_method
+                }))
+
+                return create_policy(
+                    "cloudmart-admin",
+                    "Allow",
+                    method_arn,
+                    "ADMIN"
+                )
+
+
+            print(json.dumps({
+                "event": "authorization_denied",
+                "role": "ADMIN",
+                "method": http_method
+            }))
+
+            return create_policy(
+                "cloudmart-admin",
+                "Deny",
+                method_arn,
+                "ADMIN"
+            )
+
+
+        # =================================================
+        # UNKNOWN ROLE
+        # =================================================
+
+        raise Exception("Unauthorized")
+
+
+    # =====================================================
+    # AUTHORIZATION ERROR
+    # =====================================================
 
     except Exception as error:
 

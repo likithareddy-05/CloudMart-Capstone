@@ -12,6 +12,7 @@ env:
   AWS_REGION: ap-south-1
   ENVIRONMENT: dev
   STACK_NAME: cloudmart-dev-auth
+
   LAMBDA_BUCKET: cloudmart-dev-lambda-430155298316
 
 
@@ -72,7 +73,7 @@ jobs:
 
 
       # ===================================================
-      # 5. COPY AUTHORiZER CODE
+      # 5. COPY AUTHORIZER CODE
       # ===================================================
 
       - name: Copy Authorizer Lambda code
@@ -220,7 +221,8 @@ jobs:
             --template-body file://cloudformation/Auth-stack.yaml \
             --parameters \
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
-              ParameterKey=TokenParameterName,ParameterValue="/cloudmart/dev/auth/token" \
+              ParameterKey=UserToken,ParameterValue="${{ secrets.CLOUDMART_USER_TOKEN }}" \
+              ParameterKey=AdminToken,ParameterValue="${{ secrets.CLOUDMART_ADMIN_TOKEN }}" \
               ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"
@@ -267,7 +269,8 @@ jobs:
             --template-body file://cloudformation/Auth-stack.yaml \
             --parameters \
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
-              ParameterKey=TokenParameterName,ParameterValue="/cloudmart/dev/auth/token" \
+              ParameterKey=UserToken,ParameterValue="${{ secrets.CLOUDMART_USER_TOKEN }}" \
+              ParameterKey=AdminToken,ParameterValue="${{ secrets.CLOUDMART_ADMIN_TOKEN }}" \
               ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"
@@ -372,7 +375,43 @@ jobs:
 
 
       # ===================================================
-      # 21. DISPLAY STACK OUTPUTS
+      # 21. VERIFY USER TOKEN PARAMETER
+      # ===================================================
+
+      - name: Verify USER SSM parameter
+
+        run: |
+
+          echo "Checking USER token parameter..."
+
+          aws ssm get-parameter \
+            --name "/cloudmart/${ENVIRONMENT}/auth/user-token" \
+            --with-decryption false \
+            --region "$AWS_REGION" \
+            --query "Parameter.Name" \
+            --output text
+
+
+      # ===================================================
+      # 22. VERIFY ADMIN TOKEN PARAMETER
+      # ===================================================
+
+      - name: Verify ADMIN SSM parameter
+
+        run: |
+
+          echo "Checking ADMIN token parameter..."
+
+          aws ssm get-parameter \
+            --name "/cloudmart/${ENVIRONMENT}/auth/admin-token" \
+            --with-decryption false \
+            --region "$AWS_REGION" \
+            --query "Parameter.Name" \
+            --output text
+
+
+      # ===================================================
+      # 23. DISPLAY STACK OUTPUTS
       # ===================================================
 
       - name: Display Auth Stack outputs
