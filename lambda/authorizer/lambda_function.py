@@ -15,13 +15,9 @@ ssm = boto3.client("ssm")
 # ENVIRONMENT VARIABLES
 # =========================================================
 
-USER_TOKEN_PARAMETER = os.environ[
-    "USER_TOKEN_PARAMETER"
-]
+USER_TOKEN_PARAMETER = os.environ["USER_TOKEN_PARAMETER"]
 
-ADMIN_TOKEN_PARAMETER = os.environ[
-    "ADMIN_TOKEN_PARAMETER"
-]
+ADMIN_TOKEN_PARAMETER = os.environ["ADMIN_TOKEN_PARAMETER"]
 
 
 # =========================================================
@@ -79,6 +75,35 @@ def create_policy(
 
 
 # =========================================================
+# CREATE API ARN BASE
+# =========================================================
+
+def get_api_arn_base(method_arn):
+
+    """
+    Example methodArn:
+
+    arn:aws:execute-api:ap-south-1:123456789012:api-id/dev/GET/products/1
+
+    We extract:
+
+    arn:aws:execute-api:ap-south-1:123456789012:api-id/dev
+    """
+
+    arn_parts = method_arn.split("/")
+
+    if len(arn_parts) < 3:
+
+        raise Exception("Invalid methodArn")
+
+    api_arn_base = "/".join(
+        arn_parts[:2]
+    )
+
+    return api_arn_base
+
+
+# =========================================================
 # LAMBDA HANDLER
 # =========================================================
 
@@ -130,6 +155,11 @@ def lambda_handler(event, context):
 
         if not provided_token:
 
+            print(json.dumps({
+                "event": "authorization_failed",
+                "reason": "empty_token"
+            }))
+
             raise Exception("Unauthorized")
 
 
@@ -143,9 +173,12 @@ def lambda_handler(event, context):
 
         if not method_arn:
 
-            raise Exception(
-                "Missing methodArn"
-            )
+            print(json.dumps({
+                "event": "authorization_failed",
+                "reason": "missing_method_arn"
+            }))
+
+            raise Exception("Unauthorized")
 
 
         # =================================================
@@ -156,15 +189,28 @@ def lambda_handler(event, context):
 
         if len(arn_parts) < 3:
 
-            raise Exception(
-                "Invalid methodArn"
-            )
+            print(json.dumps({
+                "event": "authorization_failed",
+                "reason": "invalid_method_arn"
+            }))
+
+            raise Exception("Unauthorized")
+
 
         http_method = arn_parts[2].upper()
 
 
         # =================================================
-        # GET USER TOKEN
+        # CREATE API ARN BASE
+        # =================================================
+
+        api_arn_base = get_api_arn_base(
+            method_arn
+        )
+
+
+        # =================================================
+        # USER TOKEN
         # =================================================
 
         user_token = get_token(
@@ -183,11 +229,17 @@ def lambda_handler(event, context):
 
             role = "USER"
 
+            print(json.dumps({
+                "event": "token_validated",
+                "role": "USER",
+                "method": http_method
+            }))
+
 
         else:
 
             # =============================================
-            # GET ADMIN TOKEN
+            # ADMIN TOKEN
             # =============================================
 
             admin_token = get_token(
@@ -206,6 +258,13 @@ def lambda_handler(event, context):
 
                 role = "ADMIN"
 
+                print(json.dumps({
+                    "event": "token_validated",
+                    "role": "ADMIN",
+                    "method": http_method
+                }))
+
+
             else:
 
                 print(json.dumps({
@@ -217,84 +276,73 @@ def lambda_handler(event, context):
 
 
         # =================================================
-        # USER ACCESS
+        # USER POLICY
         #
-        # USER = READ ONLY
+        # USER CAN READ PRODUCTS ONLY
+        #
+        # IMPORTANT:
+        # Use GET wildcard instead of current methodArn.
+        # This works correctly with 300 second caching.
         # =================================================
 
         if role == "USER":
 
-            if http_method == "GET":
-
-                print(json.dumps({
-                    "event": "authorization_success",
-                    "role": "USER",
-                    "method": http_method
-                }))
-
-                return create_policy(
-                    "cloudmart-user",
-                    "Allow",
-                    method_arn,
-                    "USER"
-                )
-
+            user_resource = (
+                api_arn_base
+                + "/GET/*"
+            )
 
             print(json.dumps({
-                "event": "authorization_denied",
+                "event": "authorization_success",
                 "role": "USER",
-                "method": http_method
+                "allowed_method": "GET"
             }))
 
             return create_policy(
                 "cloudmart-user",
-                "Deny",
-                method_arn,
+                "Allow",
+                user_resource,
                 "USER"
             )
 
 
         # =================================================
-        # ADMIN ACCESS
+        # ADMIN POLICY
         #
-        # ADMIN = FULL PRODUCT CRUD
+        # ADMIN CAN:
+        #
+        # GET
+        # POST
+        # PUT
+        # DELETE
+        #
+        # IMPORTANT:
+        # Allow all methods/resources under this API stage.
+        # This works correctly with 300 second caching.
         # =================================================
 
         if role == "ADMIN":
 
-            allowed_methods = {
-                "GET",
-                "POST",
-                "PUT",
-                "DELETE"
-            }
-
-            if http_method in allowed_methods:
-
-                print(json.dumps({
-                    "event": "authorization_success",
-                    "role": "ADMIN",
-                    "method": http_method
-                }))
-
-                return create_policy(
-                    "cloudmart-admin",
-                    "Allow",
-                    method_arn,
-                    "ADMIN"
-                )
-
+            admin_resource = (
+                api_arn_base
+                + "/*/*"
+            )
 
             print(json.dumps({
-                "event": "authorization_denied",
+                "event": "authorization_success",
                 "role": "ADMIN",
-                "method": http_method
+                "allowed_methods": [
+                    "GET",
+                    "POST",
+                    "PUT",
+                    "DELETE"
+                ]
             }))
 
             return create_policy(
                 "cloudmart-admin",
-                "Deny",
-                method_arn,
+                "Allow",
+                admin_resource,
                 "ADMIN"
             )
 
@@ -302,6 +350,11 @@ def lambda_handler(event, context):
         # =================================================
         # UNKNOWN ROLE
         # =================================================
+
+        print(json.dumps({
+            "event": "authorization_failed",
+            "reason": "unknown_role"
+        }))
 
         raise Exception("Unauthorized")
 
