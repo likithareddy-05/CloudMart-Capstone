@@ -13,7 +13,7 @@ env:
   ENVIRONMENT: dev
   STACK_NAME: cloudmart-dev-auth
 
-  LAMBDA_BUCKET: cloudmart-dev-lambda-430155298316
+  LAMBDA_BUCKET: cloudmart-dev-Productlambda-430155298316
 
 
 jobs:
