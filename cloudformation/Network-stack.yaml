@@ -364,6 +364,8 @@ Resources:
   #   +---- SSM
   #   |
   #   +---- CloudWatch Logs
+  #   |
+  #   +---- EventBridge
   # =========================================================
 
   VpcEndpointSecurityGroup:
@@ -508,6 +510,56 @@ Resources:
 
         - Key: Name
           Value: !Sub cloudmart-${Environment}-logs-endpoint
+
+
+  # =========================================================
+  # EVENTBRIDGE VPC INTERFACE ENDPOINT
+  # =========================================================
+  #
+  # Allows Lambda functions running inside the private subnet
+  # to communicate with Amazon EventBridge privately.
+  #
+  # Flow:
+  #
+  # Product Lambda
+  #       |
+  #       | events:PutEvents
+  #       v
+  # EventBridge VPC Endpoint
+  #       |
+  #       v
+  # EventBridge Event Bus
+  #
+  # No Internet/NAT Gateway is required for this connection.
+  # =========================================================
+
+  EventBridgeVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+
+    Properties:
+
+      VpcId:
+        !Ref CloudMartVPC
+
+      ServiceName:
+        !Sub com.amazonaws.${AWS::Region}.events
+
+      VpcEndpointType: Interface
+
+      PrivateDnsEnabled: true
+
+      SubnetIds:
+
+        - !Ref PrivateSubnet
+
+      SecurityGroupIds:
+
+        - !Ref VpcEndpointSecurityGroup
+
+      Tags:
+
+        - Key: Name
+          Value: !Sub cloudmart-${Environment}-eventbridge-endpoint
 
 
 # =========================================================
@@ -670,3 +722,21 @@ Outputs:
     Export:
       Name:
         !Sub CloudMart-${Environment}-CloudWatchLogsVpcEndpointId
+
+
+  # =========================================================
+  # EVENTBRIDGE VPC ENDPOINT
+  # =========================================================
+
+  EventBridgeVpcEndpointId:
+
+    Description:
+      EventBridge VPC interface endpoint used by
+      private Lambda functions to publish events.
+
+    Value:
+      !Ref EventBridgeVpcEndpoint
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-EventBridgeVpcEndpointId
