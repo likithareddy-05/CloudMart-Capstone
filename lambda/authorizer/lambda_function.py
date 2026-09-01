@@ -23,15 +23,12 @@ ADMIN_TOKEN_PARAMETER = os.environ["ADMIN_TOKEN_PARAMETER"]
 # =========================================================
 # USER IDs
 #
-# These correspond to the seeded users in schema.sql.
-#
-# user@cloudmart.com  -> user_id 1
-# admin@cloudmart.com -> user_id 2
+# These IDs correspond to the sample users created
+# in the CloudMart users table.
 # =========================================================
 
-USER_ID = "1"
-
-ADMIN_ID = "2"
+USER_ID = 1
+ADMIN_ID = 2
 
 
 # =========================================================
@@ -85,7 +82,7 @@ def create_policy(
 
             "role": role,
 
-            "user_id": user_id
+            "user_id": str(user_id)
 
         }
     }
@@ -98,11 +95,11 @@ def create_policy(
 def get_api_arn_base(method_arn):
 
     """
-    Example:
+    Example methodArn:
 
     arn:aws:execute-api:ap-south-1:123456789012:api-id/dev/GET/products/1
 
-    Result:
+    We extract:
 
     arn:aws:execute-api:ap-south-1:123456789012:api-id/dev
     """
@@ -250,7 +247,7 @@ def lambda_handler(event, context):
 
             print(json.dumps({
                 "event": "token_validated",
-                "role": "USER",
+                "role": role,
                 "user_id": user_id,
                 "method": http_method
             }))
@@ -282,7 +279,7 @@ def lambda_handler(event, context):
 
                 print(json.dumps({
                     "event": "token_validated",
-                    "role": "ADMIN",
+                    "role": role,
                     "user_id": user_id,
                     "method": http_method
                 }))
@@ -302,9 +299,6 @@ def lambda_handler(event, context):
         # USER POLICY
         #
         # USER CAN READ PRODUCTS ONLY
-        #
-        # GET wildcard is used so that authorizer caching
-        # continues to work correctly.
         # =================================================
 
         if role == "USER":
@@ -339,7 +333,6 @@ def lambda_handler(event, context):
         # POST
         # PUT
         # DELETE
-        #
         # =================================================
 
         if role == "ADMIN":
