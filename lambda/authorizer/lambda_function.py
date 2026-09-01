@@ -21,6 +21,20 @@ ADMIN_TOKEN_PARAMETER = os.environ["ADMIN_TOKEN_PARAMETER"]
 
 
 # =========================================================
+# USER IDs
+#
+# These correspond to the seeded users in schema.sql.
+#
+# user@cloudmart.com  -> user_id 1
+# admin@cloudmart.com -> user_id 2
+# =========================================================
+
+USER_ID = "1"
+
+ADMIN_ID = "2"
+
+
+# =========================================================
 # GET TOKEN FROM SSM
 # =========================================================
 
@@ -42,7 +56,8 @@ def create_policy(
     principal_id,
     effect,
     resource,
-    role
+    role,
+    user_id
 ):
 
     return {
@@ -68,7 +83,9 @@ def create_policy(
 
         "context": {
 
-            "role": role
+            "role": role,
+
+            "user_id": user_id
 
         }
     }
@@ -81,11 +98,11 @@ def create_policy(
 def get_api_arn_base(method_arn):
 
     """
-    Example methodArn:
+    Example:
 
     arn:aws:execute-api:ap-south-1:123456789012:api-id/dev/GET/products/1
 
-    We extract:
+    Result:
 
     arn:aws:execute-api:ap-south-1:123456789012:api-id/dev
     """
@@ -210,7 +227,7 @@ def lambda_handler(event, context):
 
 
         # =================================================
-        # USER TOKEN
+        # GET USER TOKEN
         # =================================================
 
         user_token = get_token(
@@ -229,9 +246,12 @@ def lambda_handler(event, context):
 
             role = "USER"
 
+            user_id = USER_ID
+
             print(json.dumps({
                 "event": "token_validated",
                 "role": "USER",
+                "user_id": user_id,
                 "method": http_method
             }))
 
@@ -239,7 +259,7 @@ def lambda_handler(event, context):
         else:
 
             # =============================================
-            # ADMIN TOKEN
+            # GET ADMIN TOKEN
             # =============================================
 
             admin_token = get_token(
@@ -258,9 +278,12 @@ def lambda_handler(event, context):
 
                 role = "ADMIN"
 
+                user_id = ADMIN_ID
+
                 print(json.dumps({
                     "event": "token_validated",
                     "role": "ADMIN",
+                    "user_id": user_id,
                     "method": http_method
                 }))
 
@@ -280,9 +303,8 @@ def lambda_handler(event, context):
         #
         # USER CAN READ PRODUCTS ONLY
         #
-        # IMPORTANT:
-        # Use GET wildcard instead of current methodArn.
-        # This works correctly with 300 second caching.
+        # GET wildcard is used so that authorizer caching
+        # continues to work correctly.
         # =================================================
 
         if role == "USER":
@@ -295,6 +317,7 @@ def lambda_handler(event, context):
             print(json.dumps({
                 "event": "authorization_success",
                 "role": "USER",
+                "user_id": user_id,
                 "allowed_method": "GET"
             }))
 
@@ -302,7 +325,8 @@ def lambda_handler(event, context):
                 "cloudmart-user",
                 "Allow",
                 user_resource,
-                "USER"
+                "USER",
+                user_id
             )
 
 
@@ -316,9 +340,6 @@ def lambda_handler(event, context):
         # PUT
         # DELETE
         #
-        # IMPORTANT:
-        # Allow all methods/resources under this API stage.
-        # This works correctly with 300 second caching.
         # =================================================
 
         if role == "ADMIN":
@@ -331,6 +352,7 @@ def lambda_handler(event, context):
             print(json.dumps({
                 "event": "authorization_success",
                 "role": "ADMIN",
+                "user_id": user_id,
                 "allowed_methods": [
                     "GET",
                     "POST",
@@ -343,7 +365,8 @@ def lambda_handler(event, context):
                 "cloudmart-admin",
                 "Allow",
                 admin_resource,
-                "ADMIN"
+                "ADMIN",
+                user_id
             )
 
 
