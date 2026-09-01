@@ -26,6 +26,7 @@ jobs:
 
     steps:
 
+
       # =================================================
       # CHECKOUT
       # =================================================
@@ -92,7 +93,7 @@ jobs:
 
 
       # =================================================
-      # INSTALL PYMYSQL
+      # INSTALL PYMYSQL FOR PRODUCT
       # =================================================
 
       - name: Install PyMySQL
@@ -261,6 +262,151 @@ jobs:
 
 
       # =================================================
+      # PREPARE ORDER PACKAGE
+      # =================================================
+
+      - name: Prepare Order Lambda package
+
+        run: |
+
+          echo "Preparing Order Lambda..."
+
+          rm -rf order-package
+
+          mkdir order-package
+
+
+      # =================================================
+      # INSTALL PYMYSQL FOR ORDER LAMBDA
+      # =================================================
+
+      - name: Install PyMySQL for Order Lambda
+
+        run: |
+
+          echo "Installing PyMySQL..."
+
+          python -m pip install \
+            PyMySQL \
+            --target order-package
+
+
+      # =================================================
+      # COPY ORDER LAMBDA
+      # =================================================
+
+      - name: Copy Order Lambda
+
+        run: |
+
+          echo "Copying Order Lambda..."
+
+          cp lambda/order/lambda_function.py \
+            order-package/
+
+
+      # =================================================
+      # CREATE ORDER ZIP
+      # =================================================
+
+      - name: Create Order Lambda ZIP
+
+        run: |
+
+          echo "Creating Order Lambda ZIP..."
+
+          cd order-package
+
+          zip -r \
+            "../order-${GITHUB_SHA}.zip" \
+            .
+
+          cd ..
+
+          echo "Order Lambda ZIP created."
+
+
+      # =================================================
+      # VERIFY ORDER ZIP
+      # =================================================
+
+      - name: Verify Order Lambda ZIP
+
+        run: |
+
+          echo "=========================================="
+
+          echo "Order Lambda package contents"
+
+          echo "=========================================="
+
+          unzip -l "order-${GITHUB_SHA}.zip"
+
+          echo "Checking lambda_function.py..."
+
+          unzip -l "order-${GITHUB_SHA}.zip" \
+            | grep "lambda_function.py"
+
+          echo "Checking PyMySQL..."
+
+          unzip -l "order-${GITHUB_SHA}.zip" \
+            | grep "pymysql"
+
+          echo "Order Lambda package verified."
+
+
+      # =================================================
+      # SET ORDER LAMBDA S3 KEY
+      # =================================================
+
+      - name: Set Order Lambda S3 key
+
+        run: |
+
+          echo \
+            "ORDER_LAMBDA_S3_KEY=order/order-${GITHUB_SHA}.zip" \
+            >> "$GITHUB_ENV"
+
+          echo "Order Lambda S3 key configured."
+
+
+      # =================================================
+      # UPLOAD ORDER ZIP
+      # =================================================
+
+      - name: Upload Order Lambda package
+
+        run: |
+
+          echo "Uploading Order Lambda package..."
+
+          aws s3 cp \
+            "order-${GITHUB_SHA}.zip" \
+            "s3://${LAMBDA_BUCKET}/${ORDER_LAMBDA_S3_KEY}" \
+            --region "$AWS_REGION"
+
+          echo "Order Lambda package uploaded."
+
+
+      # =================================================
+      # VERIFY ORDER S3 PACKAGE
+      # =================================================
+
+      - name: Verify Order Lambda S3 package
+
+        run: |
+
+          echo "Checking Order Lambda S3 package..."
+
+          aws s3api head-object \
+            --bucket "$LAMBDA_BUCKET" \
+            --key "$ORDER_LAMBDA_S3_KEY" \
+            --region "$AWS_REGION"
+
+          echo "Order Lambda S3 package verified."
+
+
+      # =================================================
       # VALIDATE CLOUDFORMATION TEMPLATE
       # =================================================
 
@@ -325,6 +471,8 @@ jobs:
               ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
               ParameterKey=InventoryAlertLambdaS3Key,ParameterValue="$INVENTORY_ALERT_S3_KEY" \
               ParameterKey=LowStockEmail,ParameterValue="${{ secrets.LOW_STOCK_EMAIL }}" \
+              ParameterKey=OrderLambdaS3Key,ParameterValue="$ORDER_LAMBDA_S3_KEY" \
+              ParameterKey=OrderEmail,ParameterValue="${{ secrets.ORDER_EMAIL }}" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"
 
@@ -372,6 +520,8 @@ jobs:
               ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
               ParameterKey=InventoryAlertLambdaS3Key,ParameterValue="$INVENTORY_ALERT_S3_KEY" \
               ParameterKey=LowStockEmail,ParameterValue="${{ secrets.LOW_STOCK_EMAIL }}" \
+              ParameterKey=OrderLambdaS3Key,ParameterValue="$ORDER_LAMBDA_S3_KEY" \
+              ParameterKey=OrderEmail,ParameterValue="${{ secrets.ORDER_EMAIL }}" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"
 
@@ -401,7 +551,9 @@ jobs:
           else
 
             echo "=========================================="
+
             echo "CHANGE SET CREATION FAILED"
+
             echo "=========================================="
 
             aws cloudformation describe-change-set \
@@ -493,6 +645,23 @@ jobs:
 
 
       # =================================================
+      # VERIFY ORDER LAMBDA
+      # =================================================
+
+      - name: Verify Order Lambda
+
+        run: |
+
+          echo "Checking Order Lambda..."
+
+          aws lambda get-function \
+            --function-name CloudMart-dev-OrderLambda \
+            --region "$AWS_REGION" \
+            --query "Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler,State:State}" \
+            --output table
+
+
+      # =================================================
       # VERIFY INVENTORY ALERT LAMBDA
       # =================================================
 
@@ -523,10 +692,10 @@ jobs:
 
 
       # =================================================
-      # VERIFY EVENTBRIDGE RULE
+      # VERIFY INVENTORY EVENTBRIDGE RULE
       # =================================================
 
-      - name: Verify EventBridge Rule
+      - name: Verify Inventory Alert EventBridge Rule
 
         run: |
 
@@ -537,11 +706,44 @@ jobs:
             --query "{Name:Name,State:State,EventBusName:EventBusName}" \
             --output table
 
+
       # =================================================
-      # VERIFY SNS TOPIC
+      # VERIFY ORDER CONFIRMED RULE
       # =================================================
 
-      - name: Verify SNS Topic
+      - name: Verify Order Confirmed EventBridge Rule
+
+        run: |
+
+          aws events describe-rule \
+            --name "CloudMart-${ENVIRONMENT}-OrderConfirmedRule" \
+            --event-bus-name "CloudMart-${ENVIRONMENT}-EventBus" \
+            --region "$AWS_REGION" \
+            --query "{Name:Name,State:State,EventBusName:EventBusName}" \
+            --output table
+
+
+      # =================================================
+      # VERIFY ORDER FAILED RULE
+      # =================================================
+
+      - name: Verify Order Failed EventBridge Rule
+
+        run: |
+
+          aws events describe-rule \
+            --name "CloudMart-${ENVIRONMENT}-OrderFailedRule" \
+            --event-bus-name "CloudMart-${ENVIRONMENT}-EventBus" \
+            --region "$AWS_REGION" \
+            --query "{Name:Name,State:State,EventBusName:EventBusName}" \
+            --output table
+
+
+      # =================================================
+      # VERIFY LOW STOCK SNS
+      # =================================================
+
+      - name: Verify Low Stock SNS Topic
 
         run: |
 
@@ -567,7 +769,40 @@ jobs:
             --topic-arn "$SNS_TOPIC_ARN" \
             --region "$AWS_REGION"
 
-          echo "SNS Topic verified successfully."
+          echo "Low Stock SNS Topic verified successfully."
+
+
+      # =================================================
+      # VERIFY ORDER SNS
+      # =================================================
+
+      - name: Verify Order SNS Topic
+
+        run: |
+
+          echo "Checking Order SNS Topic..."
+
+          ORDER_TOPIC_ARN=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='OrderTopicArn'].OutputValue" \
+            --output text)
+
+          echo "Order SNS Topic ARN: $ORDER_TOPIC_ARN"
+
+          if [ -z "$ORDER_TOPIC_ARN" ] || [ "$ORDER_TOPIC_ARN" = "None" ]; then
+
+            echo "OrderTopicArn output was not found."
+
+            exit 1
+
+          fi
+
+          aws sns get-topic-attributes \
+            --topic-arn "$ORDER_TOPIC_ARN" \
+            --region "$AWS_REGION"
+
+          echo "Order SNS Topic verified successfully."
 
 
       # =================================================

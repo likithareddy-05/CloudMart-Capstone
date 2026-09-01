@@ -2,9 +2,10 @@ AWSTemplateFormatVersion: '2010-09-09'
 
 Description: >
   CloudMart API Stack.
-  Creates API Gateway and Product Lambda.
-  Product Lambda runs inside the existing VPC
-  and connects to the existing RDS database.
+  Creates API Gateway, Product Lambda, Order Lambda,
+  Inventory Alert Lambda, EventBridge and SNS resources.
+  Product and Order Lambdas run inside the existing VPC
+  and connect to the existing RDS database.
 
 
 # =========================================================
@@ -21,25 +22,32 @@ Parameters:
       - dev
       - test
       - prod
-    
 
     Description: Deployment environment
-  
+
+
+  # =======================================================
+  # INVENTORY ALERT LAMBDA
+  # =======================================================
+
   InventoryAlertLambdaS3Key:
     Type: String
     Default: inventory-alert/inventory-alert.zip
 
-    Description: 
+    Description: >
       S3 key containing the Inventory Alert Lambda package.
 
 
   LowStockEmail:
     Type: String
 
-    Description: 
+    Description: >
       Email address for CloudMart low-stock alerts.
-  
 
+
+  # =======================================================
+  # PRODUCT LAMBDA
+  # =======================================================
 
   LambdaS3Key:
     Type: String
@@ -49,12 +57,32 @@ Parameters:
       S3 key containing the Product Lambda package.
 
 
+  # =======================================================
+  # ORDER LAMBDA
+  # =======================================================
+
+  OrderLambdaS3Key:
+    Type: String
+    Default: order/order.zip
+
+    Description: >
+      S3 key containing the Order Lambda package.
+
+
+  OrderEmail:
+    Type: String
+
+    Description: >
+      Email address for CloudMart order notifications.
+
+
 # =========================================================
 # RESOURCES
 # =========================================================
 
 Resources:
-  
+
+
   # =======================================================
   # EVENTBRIDGE EVENT BUS
   # =======================================================
@@ -67,6 +95,7 @@ Resources:
 
       Name:
         !Sub CloudMart-${Environment}-EventBus
+
 
   # =======================================================
   # SNS LOW STOCK TOPIC
@@ -84,8 +113,9 @@ Resources:
       DisplayName:
         !Sub CloudMart ${Environment} Low Stock Alerts
 
+
   # =======================================================
-  # SNS EMAIL SUBSCRIPTION
+  # SNS LOW STOCK EMAIL SUBSCRIPTION
   # =======================================================
 
   LowStockEmailSubscription:
@@ -102,6 +132,44 @@ Resources:
 
       Endpoint:
         !Ref LowStockEmail
+
+
+  # =======================================================
+  # SNS ORDER TOPIC
+  # =======================================================
+
+  OrderTopic:
+
+    Type: AWS::SNS::Topic
+
+    Properties:
+
+      TopicName:
+        !Sub CloudMart-${Environment}-OrderTopic
+
+      DisplayName:
+        !Sub CloudMart ${Environment} Order Notifications
+
+
+  # =======================================================
+  # SNS ORDER EMAIL SUBSCRIPTION
+  # =======================================================
+
+  OrderEmailSubscription:
+
+    Type: AWS::SNS::Subscription
+
+    Properties:
+
+      TopicArn:
+        !Ref OrderTopic
+
+      Protocol:
+        email
+
+      Endpoint:
+        !Ref OrderEmail
+
 
   # =======================================================
   # INVENTORY ALERT LAMBDA
@@ -138,7 +206,6 @@ Resources:
       Code:
 
         S3Bucket:
-
           Fn::ImportValue:
             !Sub CloudMart-${Environment}-LambdaBucket
 
@@ -146,7 +213,7 @@ Resources:
           !Ref InventoryAlertLambdaS3Key
 
 
-    # =======================================================
+  # =======================================================
   # EVENTBRIDGE INVENTORY UPDATED RULE
   # =======================================================
 
@@ -183,7 +250,8 @@ Resources:
           Arn:
             !GetAtt InventoryAlertLambda.Arn
 
-    # =======================================================
+
+  # =======================================================
   # EVENTBRIDGE → INVENTORY ALERT LAMBDA PERMISSION
   # =======================================================
 
@@ -204,6 +272,7 @@ Resources:
 
       SourceArn:
         !GetAtt InventoryChangedRule.Arn
+
 
   # =======================================================
   # PRODUCT LAMBDA
@@ -241,6 +310,7 @@ Resources:
 
           ENVIRONMENT:
             !Ref Environment
+
           EVENT_BUS_NAME:
             !Ref CloudMartEventBus
 
@@ -278,6 +348,211 @@ Resources:
 
 
   # =======================================================
+  # ORDER LAMBDA
+  # =======================================================
+
+  OrderLambda:
+
+    Type: AWS::Lambda::Function
+
+    Properties:
+
+      FunctionName:
+        !Sub CloudMart-${Environment}-OrderLambda
+
+      Runtime: python3.12
+
+      Handler: lambda_function.lambda_handler
+
+      MemorySize: 256
+
+      Timeout: 30
+
+      # ---------------------------------------------------
+      # ORDER LAMBDA IAM ROLE
+      # ---------------------------------------------------
+
+      Role:
+        Fn::ImportValue:
+          !Sub CloudMart-${Environment}-OrderLambdaRoleArn
+
+
+      # ---------------------------------------------------
+      # ENVIRONMENT VARIABLES
+      # ---------------------------------------------------
+
+      Environment:
+
+        Variables:
+
+          ENVIRONMENT:
+            !Ref Environment
+
+          EVENT_BUS_NAME:
+            !Ref CloudMartEventBus
+
+          SNS_TOPIC_ARN:
+            !Ref OrderTopic
+
+
+      # ---------------------------------------------------
+      # VPC
+      # ---------------------------------------------------
+
+      VpcConfig:
+
+        SubnetIds:
+
+          - Fn::ImportValue:
+              !Sub CloudMart-${Environment}-PrivateSubnetId
+
+        SecurityGroupIds:
+
+          - Fn::ImportValue:
+              !Sub CloudMart-${Environment}-LambdaSecurityGroupId
+
+
+      # ---------------------------------------------------
+      # LAMBDA CODE
+      # ---------------------------------------------------
+
+      Code:
+
+        S3Bucket:
+
+          Fn::ImportValue:
+            !Sub CloudMart-${Environment}-LambdaBucket
+
+        S3Key:
+          !Ref OrderLambdaS3Key
+
+
+  # =======================================================
+  # EVENTBRIDGE → ORDER CONFIRMED → SNS
+  # =======================================================
+
+  OrderConfirmedRule:
+
+    Type: AWS::Events::Rule
+
+    Properties:
+
+      Name:
+        !Sub CloudMart-${Environment}-OrderConfirmedRule
+
+      EventBusName:
+        !Ref CloudMartEventBus
+
+      State:
+        ENABLED
+
+      EventPattern:
+
+        source:
+
+          - cloudmart.order
+
+        detail-type:
+
+          - OrderConfirmed
+
+      Targets:
+
+        - Id:
+            OrderConfirmedSNSTarget
+
+          Arn:
+            !Ref OrderTopic
+
+
+  # =======================================================
+  # EVENTBRIDGE → ORDER FAILED → SNS
+  # =======================================================
+
+  OrderFailedRule:
+
+    Type: AWS::Events::Rule
+
+    Properties:
+
+      Name:
+        !Sub CloudMart-${Environment}-OrderFailedRule
+
+      EventBusName:
+        !Ref CloudMartEventBus
+
+      State:
+        ENABLED
+
+      EventPattern:
+
+        source:
+
+          - cloudmart.order
+
+        detail-type:
+
+          - OrderFailed
+
+      Targets:
+
+        - Id:
+            OrderFailedSNSTarget
+
+          Arn:
+            !Ref OrderTopic
+
+
+  # =======================================================
+  # SNS POLICY FOR EVENTBRIDGE
+  # =======================================================
+
+  OrderTopicPolicy:
+
+    Type: AWS::SNS::TopicPolicy
+
+    Properties:
+
+      Topics:
+
+        - !Ref OrderTopic
+
+      PolicyDocument:
+
+        Version: '2012-10-17'
+
+        Statement:
+
+          - Sid:
+              AllowEventBridgePublish
+
+            Effect:
+              Allow
+
+            Principal:
+
+              Service:
+                - events.amazonaws.com
+
+            Action:
+
+              - sns:Publish
+
+            Resource:
+              !Ref OrderTopic
+
+            Condition:
+
+              ArnEquals:
+
+                aws:SourceArn:
+
+                  - !GetAtt OrderConfirmedRule.Arn
+
+                  - !GetAtt OrderFailedRule.Arn
+
+
+  # =======================================================
   # API GATEWAY
   # =======================================================
 
@@ -291,7 +566,7 @@ Resources:
         !Sub CloudMart-${Environment}-API
 
       Description:
-        CloudMart Product API
+        CloudMart Product and Order API
 
 
   # =======================================================
@@ -310,7 +585,8 @@ Resources:
       ParentId:
         !GetAtt ApiGateway.RootResourceId
 
-      PathPart: products
+      PathPart:
+        products
 
 
   # =======================================================
@@ -329,7 +605,48 @@ Resources:
       ParentId:
         !Ref ProductsResource
 
-      PathPart: '{id}'
+      PathPart:
+        '{id}'
+
+
+  # =======================================================
+  # /orders
+  # =======================================================
+
+  OrdersResource:
+
+    Type: AWS::ApiGateway::Resource
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      ParentId:
+        !GetAtt ApiGateway.RootResourceId
+
+      PathPart:
+        orders
+
+
+  # =======================================================
+  # /orders/{id}
+  # =======================================================
+
+  OrderIdResource:
+
+    Type: AWS::ApiGateway::Resource
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      ParentId:
+        !Ref OrdersResource
+
+      PathPart:
+        '{id}'
 
 
   # =======================================================
@@ -348,7 +665,8 @@ Resources:
       RestApiId:
         !Ref ApiGateway
 
-      Type: TOKEN
+      Type:
+        TOKEN
 
       IdentitySource:
         method.request.header.Authorization
@@ -356,11 +674,14 @@ Resources:
       AuthorizerUri:
         !Sub
           - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AuthorizerArn}/invocations
+
           - AuthorizerArn:
+
               Fn::ImportValue:
                 !Sub CloudMart-${Environment}-AuthorizerLambdaArn
 
-      AuthorizerResultTtlInSeconds: 300
+      AuthorizerResultTtlInSeconds:
+        300
 
 
   # =======================================================
@@ -379,22 +700,27 @@ Resources:
       ResourceId:
         !Ref ProductsResource
 
-      HttpMethod: GET
+      HttpMethod:
+        GET
 
-      AuthorizationType: CUSTOM
+      AuthorizationType:
+        CUSTOM
 
       AuthorizerId:
         !Ref Authorizer
 
       Integration:
 
-        Type: AWS_PROXY
+        Type:
+          AWS_PROXY
 
-        IntegrationHttpMethod: POST
+        IntegrationHttpMethod:
+          POST
 
         Uri:
           !Sub
             - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProductLambdaArn}/invocations
+
             - ProductLambdaArn:
                 !GetAtt ProductLambda.Arn
 
@@ -415,22 +741,27 @@ Resources:
       ResourceId:
         !Ref ProductsResource
 
-      HttpMethod: POST
+      HttpMethod:
+        POST
 
-      AuthorizationType: CUSTOM
+      AuthorizationType:
+        CUSTOM
 
       AuthorizerId:
         !Ref Authorizer
 
       Integration:
 
-        Type: AWS_PROXY
+        Type:
+          AWS_PROXY
 
-        IntegrationHttpMethod: POST
+        IntegrationHttpMethod:
+          POST
 
         Uri:
           !Sub
             - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProductLambdaArn}/invocations
+
             - ProductLambdaArn:
                 !GetAtt ProductLambda.Arn
 
@@ -451,22 +782,27 @@ Resources:
       ResourceId:
         !Ref ProductIdResource
 
-      HttpMethod: GET
+      HttpMethod:
+        GET
 
-      AuthorizationType: CUSTOM
+      AuthorizationType:
+        CUSTOM
 
       AuthorizerId:
         !Ref Authorizer
 
       Integration:
 
-        Type: AWS_PROXY
+        Type:
+          AWS_PROXY
 
-        IntegrationHttpMethod: POST
+        IntegrationHttpMethod:
+          POST
 
         Uri:
           !Sub
             - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProductLambdaArn}/invocations
+
             - ProductLambdaArn:
                 !GetAtt ProductLambda.Arn
 
@@ -487,22 +823,27 @@ Resources:
       ResourceId:
         !Ref ProductIdResource
 
-      HttpMethod: PUT
+      HttpMethod:
+        PUT
 
-      AuthorizationType: CUSTOM
+      AuthorizationType:
+        CUSTOM
 
       AuthorizerId:
         !Ref Authorizer
 
       Integration:
 
-        Type: AWS_PROXY
+        Type:
+          AWS_PROXY
 
-        IntegrationHttpMethod: POST
+        IntegrationHttpMethod:
+          POST
 
         Uri:
           !Sub
             - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProductLambdaArn}/invocations
+
             - ProductLambdaArn:
                 !GetAtt ProductLambda.Arn
 
@@ -523,28 +864,156 @@ Resources:
       ResourceId:
         !Ref ProductIdResource
 
-      HttpMethod: DELETE
+      HttpMethod:
+        DELETE
 
-      AuthorizationType: CUSTOM
+      AuthorizationType:
+        CUSTOM
 
       AuthorizerId:
         !Ref Authorizer
 
       Integration:
 
-        Type: AWS_PROXY
+        Type:
+          AWS_PROXY
 
-        IntegrationHttpMethod: POST
+        IntegrationHttpMethod:
+          POST
 
         Uri:
           !Sub
             - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProductLambdaArn}/invocations
+
             - ProductLambdaArn:
                 !GetAtt ProductLambda.Arn
 
 
   # =======================================================
-  # LAMBDA PERMISSION
+  # POST /orders
+  # =======================================================
+
+  PostOrdersMethod:
+
+    Type: AWS::ApiGateway::Method
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      ResourceId:
+        !Ref OrdersResource
+
+      HttpMethod:
+        POST
+
+      AuthorizationType:
+        CUSTOM
+
+      AuthorizerId:
+        !Ref Authorizer
+
+      Integration:
+
+        Type:
+          AWS_PROXY
+
+        IntegrationHttpMethod:
+          POST
+
+        Uri:
+          !Sub
+            - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OrderLambdaArn}/invocations
+
+            - OrderLambdaArn:
+                !GetAtt OrderLambda.Arn
+
+
+  # =======================================================
+  # GET /orders
+  # =======================================================
+
+  GetOrdersMethod:
+
+    Type: AWS::ApiGateway::Method
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      ResourceId:
+        !Ref OrdersResource
+
+      HttpMethod:
+        GET
+
+      AuthorizationType:
+        CUSTOM
+
+      AuthorizerId:
+        !Ref Authorizer
+
+      Integration:
+
+        Type:
+          AWS_PROXY
+
+        IntegrationHttpMethod:
+          POST
+
+        Uri:
+          !Sub
+            - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OrderLambdaArn}/invocations
+
+            - OrderLambdaArn:
+                !GetAtt OrderLambda.Arn
+
+
+  # =======================================================
+  # GET /orders/{id}
+  # =======================================================
+
+  GetOrderMethod:
+
+    Type: AWS::ApiGateway::Method
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
+      ResourceId:
+        !Ref OrderIdResource
+
+      HttpMethod:
+        GET
+
+      AuthorizationType:
+        CUSTOM
+
+      AuthorizerId:
+        !Ref Authorizer
+
+      Integration:
+
+        Type:
+          AWS_PROXY
+
+        IntegrationHttpMethod:
+          POST
+
+        Uri:
+          !Sub
+            - arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${OrderLambdaArn}/invocations
+
+            - OrderLambdaArn:
+                !GetAtt OrderLambda.Arn
+
+
+  # =======================================================
+  # PRODUCT LAMBDA PERMISSION
   # =======================================================
 
   ProductLambdaPermission:
@@ -555,6 +1024,26 @@ Resources:
 
       FunctionName:
         !Ref ProductLambda
+
+      Action:
+        lambda:InvokeFunction
+
+      Principal:
+        apigateway.amazonaws.com
+
+
+  # =======================================================
+  # ORDER LAMBDA PERMISSION
+  # =======================================================
+
+  OrderLambdaPermission:
+
+    Type: AWS::Lambda::Permission
+
+    Properties:
+
+      FunctionName:
+        !Ref OrderLambda
 
       Action:
         lambda:InvokeFunction
@@ -578,6 +1067,10 @@ Resources:
       - GetProductMethod
       - PutProductMethod
       - DeleteProductMethod
+
+      - PostOrdersMethod
+      - GetOrdersMethod
+      - GetOrderMethod
 
     Properties:
 
@@ -605,8 +1098,7 @@ Outputs:
       CloudMart API Gateway URL
 
     Value:
-      !Sub
-        https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
+      !Sub https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}
 
 
   # =======================================================
@@ -654,6 +1146,40 @@ Outputs:
     Export:
       Name:
         !Sub CloudMart-${Environment}-ProductLambdaName
+
+
+  # =======================================================
+  # ORDER LAMBDA ARN
+  # =======================================================
+
+  OrderLambdaArn:
+
+    Description:
+      Order Lambda ARN
+
+    Value:
+      !GetAtt OrderLambda.Arn
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-OrderLambdaArn
+
+
+  # =======================================================
+  # ORDER LAMBDA NAME
+  # =======================================================
+
+  OrderLambdaName:
+
+    Description:
+      Order Lambda name
+
+    Value:
+      !Ref OrderLambda
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-OrderLambdaName
 
 
   # =======================================================
@@ -722,3 +1248,20 @@ Outputs:
     Export:
       Name:
         !Sub CloudMart-${Environment}-LowStockTopicArn
+
+
+  # =======================================================
+  # ORDER SNS TOPIC ARN
+  # =======================================================
+
+  OrderTopicArn:
+
+    Description:
+      Order notification SNS topic ARN
+
+    Value:
+      !Ref OrderTopic
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-OrderTopicArn
