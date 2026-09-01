@@ -4,8 +4,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  id-token: write
-  contents: read
+  id-token: write #used for OIDC authentication between GitHub Actions and AWS.
+  contents: read  #Allows GitHub Actions to read/checkout the repository.
 
 env:
   AWS_REGION: ap-south-1
@@ -14,7 +14,7 @@ env:
 
 jobs:
 
-  deploy:
+  deploy:   #Create an Ubuntu runner and execute the deployment steps there.
 
     runs-on: ubuntu-latest
 
@@ -24,7 +24,7 @@ jobs:
       # 1. Checkout repository
       # ----------------------------------------
 
-      - name: Checkout repository
+      - name: Checkout repository #downloads GitHub repository into the GitHub Actions runner.
         uses: actions/checkout@v4
 
 
@@ -32,11 +32,11 @@ jobs:
       # 2. Configure AWS credentials
       # ----------------------------------------
 
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials    #GitHub gets permission to work with AWS.
         uses: aws-actions/configure-aws-credentials@v4
 
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}    #GitHub assumes an IAM role in AWS account.
           aws-region: ${{ env.AWS_REGION }}
 
 
@@ -44,7 +44,7 @@ jobs:
       # 3. Verify AWS access
       # ----------------------------------------
 
-      - name: Verify AWS identity
+      - name: Verify AWS identity #verify that GitHub successfully assumed the expected IAM role.
         run: |
           aws sts get-caller-identity
 
@@ -54,7 +54,7 @@ jobs:
       # ----------------------------------------
 
       - name: Validate Network Stack
-        run: |
+        run: |    #checks whether your CloudFormation template is syntactically valid.
           aws cloudformation validate-template \
             --template-body file://cloudformation/Network-stack.yaml \
             --region "$AWS_REGION"
@@ -120,7 +120,7 @@ jobs:
 
       - name: Create Network Change Set
         if: steps.stack.outputs.exists == 'true'
-
+#A Change Set allows CloudFormation to calculate what will change before executing the update.
         run: |
 
           CHANGE_SET_NAME="network-${GITHUB_SHA}"
@@ -141,7 +141,7 @@ jobs:
 
       - name: Wait for Change Set
         if: steps.stack.outputs.exists == 'true'
-
+#GITHUB_SHA identifies the specific Git commit that triggered/run the workflow context.
         run: |
 
           CHANGE_SET_NAME="network-${GITHUB_SHA}"

@@ -296,7 +296,7 @@ Resources:
   #   TCP 3306 -> RDS private subnets
   #
   # IMPORTANT:
-  # We use subnet CIDRs for outbound 3306 instead of
+  # We use subnet CIDRs for outbound 3306 instead  of
   # DestinationSecurityGroupId: !Ref RdsSecurityGroup.
   #
   # This avoids a CloudFormation circular dependency because

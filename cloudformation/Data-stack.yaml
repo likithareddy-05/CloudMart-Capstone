@@ -5,7 +5,7 @@ Description: CloudMart Data Stack
 # =========================================================
 # PARAMETERS
 # =========================================================
-
+#Provide persistent data storage and object storage for CloudMart.    
 Parameters:
 
   Environment:
@@ -17,7 +17,7 @@ Parameters:
       - test
       - prod
 
-
+#Lambda later uses database credentials to connect to MySQL.
   DBName:
     Type: String
     Default: cloudmart
@@ -54,12 +54,12 @@ Resources:
 
   RdsSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
-
+#These are the subnets where my database is allowed to be placed.
     Properties:
 
       DBSubnetGroupDescription:
         CloudMart DB Subnet Group
-
+#RDS DB subnet group requires subnets in at least two AZs.
       SubnetIds:
 
         # Primary private subnet
@@ -109,7 +109,7 @@ Resources:
       AllocatedStorage: 20
 
       StorageType: gp3
-
+#gp3 is EBS-backed general-purpose SSD storage type used by RDS.
 
       # ---------------------------------------------------
       # SINGLE-AZ
@@ -172,7 +172,7 @@ Resources:
         - Fn::ImportValue:
             !Sub CloudMart-${Environment}-RdsSecurityGroupId
 
-
+#Data Stack imports that security group ID and attaches it to RDS.It is cross-stack dependency.
       # ---------------------------------------------------
       # RDS SUBNET GROUP
       # ---------------------------------------------------
@@ -214,7 +214,7 @@ Resources:
       BucketName:
         !Sub cloudmart-${Environment}-lambda-${AWS::AccountId}
 
-
+#It stores your Lambda deployment ZIP packages.
   # =======================================================
   # REPORTS S3 BUCKET
   # =======================================================
@@ -226,7 +226,7 @@ Resources:
 
       BucketName:
         !Sub cloudmart-${Environment}-reports-${AWS::AccountId}
-
+#storage location for CloudMart reports.
 
 # =========================================================
 # OUTPUTS

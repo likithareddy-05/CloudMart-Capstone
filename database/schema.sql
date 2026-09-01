@@ -4,6 +4,21 @@ USE cloudmart;
 
 
 -- =====================================================
+-- USERS TABLE
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS users (
+    user_id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(150) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    role VARCHAR(20) NOT NULL DEFAULT 'USER',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+);
+
+
+-- =====================================================
 -- PRODUCTS TABLE
 -- =====================================================
 
@@ -40,10 +55,44 @@ CREATE TABLE IF NOT EXISTS inventory (
 
 
 -- =====================================================
--- PRODUCTS CATEGORY INDEX
+-- ORDERS TABLE
 -- =====================================================
 
--- Only create this index if it does not already exist.
+CREATE TABLE IF NOT EXISTS orders (
+    order_id INT AUTO_INCREMENT PRIMARY KEY,
+
+    customer_id INT NOT NULL,
+
+    product_id INT NOT NULL,
+
+    quantity INT NOT NULL,
+
+    total_amount DECIMAL(10,2) NOT NULL,
+
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_orders_customer
+        FOREIGN KEY (customer_id)
+        REFERENCES users(user_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE,
+
+    CONSTRAINT fk_orders_product
+        FOREIGN KEY (product_id)
+        REFERENCES products(product_id)
+        ON DELETE RESTRICT
+        ON UPDATE CASCADE
+);
+
+
+-- =====================================================
+-- PRODUCTS CATEGORY INDEX
+-- =====================================================
 
 SET @index_exists = (
     SELECT COUNT(*)
@@ -85,6 +134,82 @@ SET @sql = IF(
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- ORDERS CUSTOMER INDEX
+-- =====================================================
+
+SET @index_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'orders'
+      AND index_name = 'idx_orders_customer'
+);
+
+SET @sql = IF(
+    @index_exists = 0,
+    'CREATE INDEX idx_orders_customer ON orders(customer_id)',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- ORDERS PRODUCT INDEX
+-- =====================================================
+
+SET @index_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'orders'
+      AND index_name = 'idx_orders_product'
+);
+
+SET @sql = IF(
+    @index_exists = 0,
+    'CREATE INDEX idx_orders_product ON orders(product_id)',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- SAMPLE USERS
+-- =====================================================
+
+INSERT INTO users
+    (name, email, role)
+SELECT
+    'CloudMart User',
+    'user@cloudmart.com',
+    'USER'
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM users
+    WHERE email = 'user@cloudmart.com'
+);
+
+
+INSERT INTO users
+    (name, email, role)
+SELECT
+    'CloudMart Admin',
+    'admin@cloudmart.com',
+    'ADMIN'
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM users
+    WHERE email = 'admin@cloudmart.com'
+);
 
 
 -- =====================================================
