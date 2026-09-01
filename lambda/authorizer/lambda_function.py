@@ -21,17 +21,6 @@ ADMIN_TOKEN_PARAMETER = os.environ["ADMIN_TOKEN_PARAMETER"]
 
 
 # =========================================================
-# USER IDs
-#
-# These IDs correspond to the sample users created
-# in the CloudMart users table.
-# =========================================================
-
-USER_ID = 1
-ADMIN_ID = 2
-
-
-# =========================================================
 # GET TOKEN FROM SSM
 # =========================================================
 
@@ -52,10 +41,30 @@ def get_token(parameter_name):
 def create_policy(
     principal_id,
     effect,
-    resource,
+    resources,
     role,
-    user_id
+    user_id=None
 ):
+
+    statements = []
+
+    for resource in resources:
+
+        statements.append(
+            {
+                "Action": "execute-api:Invoke",
+                "Effect": effect,
+                "Resource": resource
+            }
+        )
+
+    context = {
+        "role": role
+    }
+
+    if user_id is not None:
+
+        context["user_id"] = str(user_id)
 
     return {
 
@@ -65,26 +74,10 @@ def create_policy(
 
             "Version": "2012-10-17",
 
-            "Statement": [
-
-                {
-                    "Action": "execute-api:Invoke",
-
-                    "Effect": effect,
-
-                    "Resource": resource
-                }
-
-            ]
+            "Statement": statements
         },
 
-        "context": {
-
-            "role": role,
-
-            "user_id": str(user_id)
-
-        }
+        "context": context
     }
 
 
@@ -108,7 +101,9 @@ def get_api_arn_base(method_arn):
 
     if len(arn_parts) < 3:
 
-        raise Exception("Invalid methodArn")
+        raise Exception(
+            "Invalid methodArn"
+        )
 
     api_arn_base = "/".join(
         arn_parts[:2]
@@ -224,7 +219,7 @@ def lambda_handler(event, context):
 
 
         # =================================================
-        # GET USER TOKEN
+        # USER TOKEN
         # =================================================
 
         user_token = get_token(
@@ -243,12 +238,9 @@ def lambda_handler(event, context):
 
             role = "USER"
 
-            user_id = USER_ID
-
             print(json.dumps({
                 "event": "token_validated",
-                "role": role,
-                "user_id": user_id,
+                "role": "USER",
                 "method": http_method
             }))
 
@@ -256,7 +248,7 @@ def lambda_handler(event, context):
         else:
 
             # =============================================
-            # GET ADMIN TOKEN
+            # ADMIN TOKEN
             # =============================================
 
             admin_token = get_token(
@@ -275,12 +267,9 @@ def lambda_handler(event, context):
 
                 role = "ADMIN"
 
-                user_id = ADMIN_ID
-
                 print(json.dumps({
                     "event": "token_validated",
-                    "role": role,
-                    "user_id": user_id,
+                    "role": "ADMIN",
                     "method": http_method
                 }))
 
@@ -298,29 +287,60 @@ def lambda_handler(event, context):
         # =================================================
         # USER POLICY
         #
-        # USER CAN READ PRODUCTS ONLY
+        # USER CAN:
+        #
+        # GET  all resources
+        # POST /orders
+        #
+        # USER CANNOT:
+        #
+        # POST /products
+        # PUT  /products/{id}
+        # DELETE /products/{id}
         # =================================================
 
         if role == "USER":
 
-            user_resource = (
-                api_arn_base
-                + "/GET/*"
-            )
+            user_resources = [
+
+                # USER can read products and orders
+                api_arn_base + "/GET/*",
+
+                # USER can create orders
+                api_arn_base + "/POST/orders"
+
+            ]
+
+
+            # -------------------------------------------------
+            # CURRENT SAMPLE USER
+            #
+            # database/schema.sql contains the sample USER
+            # as user_id = 1.
+            #
+            # The Order Lambda uses this value as customer_id.
+            # -------------------------------------------------
+
+            user_id = 1
+
 
             print(json.dumps({
                 "event": "authorization_success",
                 "role": "USER",
                 "user_id": user_id,
-                "allowed_method": "GET"
+                "allowed_methods": [
+                    "GET",
+                    "POST /orders"
+                ]
             }))
+
 
             return create_policy(
                 "cloudmart-user",
                 "Allow",
-                user_resource,
+                user_resources,
                 "USER",
-                user_id
+                user_id=user_id
             )
 
 
@@ -333,19 +353,22 @@ def lambda_handler(event, context):
         # POST
         # PUT
         # DELETE
+        #
+        # Allow all methods/resources under this API stage.
         # =================================================
 
         if role == "ADMIN":
 
-            admin_resource = (
-                api_arn_base
-                + "/*/*"
-            )
+            admin_resources = [
+
+                api_arn_base + "/*/*"
+
+            ]
+
 
             print(json.dumps({
                 "event": "authorization_success",
                 "role": "ADMIN",
-                "user_id": user_id,
                 "allowed_methods": [
                     "GET",
                     "POST",
@@ -354,12 +377,12 @@ def lambda_handler(event, context):
                 ]
             }))
 
+
             return create_policy(
                 "cloudmart-admin",
                 "Allow",
-                admin_resource,
-                "ADMIN",
-                user_id
+                admin_resources,
+                "ADMIN"
             )
 
 
