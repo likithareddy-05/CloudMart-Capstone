@@ -218,7 +218,7 @@ def validate_customer(
             user_id,
             name,
             email,
-            role,
+            role
         FROM users
         WHERE user_id = %s
         """,
