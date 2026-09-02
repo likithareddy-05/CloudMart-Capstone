@@ -289,7 +289,7 @@ def lambda_handler(event, context):
         #
         # USER CAN:
         #
-        # GET  all resources
+        # GET  /*
         # POST /orders
         #
         # USER CANNOT:
@@ -313,10 +313,10 @@ def lambda_handler(event, context):
 
 
             # -------------------------------------------------
-            # CURRENT SAMPLE USER
+            # SAMPLE USER
             #
-            # database/schema.sql contains the sample USER
-            # as user_id = 1.
+            # database/schema.sql creates the first USER
+            # with user_id = 1.
             #
             # The Order Lambda uses this value as customer_id.
             # -------------------------------------------------
@@ -359,11 +359,10 @@ def lambda_handler(event, context):
 
         if role == "ADMIN":
 
-            admin_resources = [
-
-                api_arn_base + "/*/*"
-
-            ]
+            admin_resource = (
+                api_arn_base
+                + "/*/*"
+            )
 
 
             print(json.dumps({
@@ -381,7 +380,7 @@ def lambda_handler(event, context):
             return create_policy(
                 "cloudmart-admin",
                 "Allow",
-                admin_resources,
+                [admin_resource],
                 "ADMIN"
             )
 
