@@ -400,6 +400,7 @@ def create_order(
                     price
                 FROM products
                 WHERE product_id = %s
+                    AND is_deleted = FALSE
                 """,
                 (product_id,)
             )

@@ -28,7 +28,6 @@ CREATE TABLE IF NOT EXISTS products (
     description VARCHAR(500),
     price DECIMAL(10,2) NOT NULL,
     category VARCHAR(100),
-    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP
@@ -306,3 +305,7 @@ WHERE name = 'Keyboard'
       FROM inventory i
       WHERE i.product_id = products.product_id
   );
+
+
+  ALTER TABLE products
+ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
