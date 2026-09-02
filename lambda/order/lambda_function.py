@@ -100,19 +100,18 @@ def get_connection():
 # RESPONSE HELPER
 # =========================================================
 
-def response(
-    status_code,
-    body
-):
+def response(status_code, body):
 
     return {
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json"
         },
-        "body": json.dumps(body)
+        "body": json.dumps(
+            body,
+            default=str
+        )
     }
-
 
 # =========================================================
 # GET AUTHENTICATED USER
