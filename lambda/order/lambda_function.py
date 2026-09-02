@@ -219,7 +219,6 @@ def validate_customer(
             name,
             email,
             role,
-            active
         FROM users
         WHERE user_id = %s
         """,
@@ -232,12 +231,6 @@ def validate_customer(
 
         raise ValueError(
             "Customer not found"
-        )
-
-    if not customer["active"]:
-
-        raise ValueError(
-            "Customer account is inactive"
         )
 
     return customer
