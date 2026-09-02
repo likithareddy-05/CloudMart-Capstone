@@ -312,20 +312,22 @@ def lambda_handler(
                 and not product_id
             ):
 
-                cursor.execute(
-                    """
+                cursor.execute("""
                     SELECT
-                        product_id,
-                        name,
-                        description,
-                        price,
-                        category,
-                        created_at,
-                        updated_at
-                    FROM products
-                    ORDER BY product_id
-                    """
-                )
+                        p.product_id,
+                        p.name,
+                        p.description,
+                        p.price,
+                        p.category,
+                        i.stock_count,
+                        i.low_stock_threshold,
+                        p.created_at,
+                        p.updated_at
+                    FROM products p
+                    LEFT JOIN inventory i
+                        ON p.product_id = i.product_id
+                    ORDER BY p.product_id
+                    """)
 
                 products = cursor.fetchall()
 
@@ -352,21 +354,22 @@ def lambda_handler(
                 and product_id
             ):
 
-                cursor.execute(
-                    """
+                cursor.execute("""
                     SELECT
-                        product_id,
-                        name,
-                        description,
-                        price,
-                        category,
-                        created_at,
-                        updated_at
-                    FROM products
-                    WHERE product_id = %s
-                    """,
-                    (product_id,)
-                )
+                        p.product_id,
+                        p.name,
+                        p.description,
+                        p.price,
+                        p.category,
+                        i.stock_count,
+                        i.low_stock_threshold,
+                        p.created_at,
+                        p.updated_at
+                    FROM products p
+                    LEFT JOIN inventory i
+                        ON p.product_id = i.product_id
+                    WHERE p.product_id = %s
+                """, (product_id,))
 
                 product = cursor.fetchone()
 
