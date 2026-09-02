@@ -113,6 +113,7 @@ def response(status_code, body):
         )
     }
 
+
 # =========================================================
 # GET AUTHENTICATED USER
 # =========================================================
@@ -155,7 +156,8 @@ def get_authorizer_context(event):
 
 def publish_event(
     detail_type,
-    detail
+    detail,
+    source="cloudmart.order"
 ):
 
     if not EVENT_BUS_NAME:
@@ -170,7 +172,7 @@ def publish_event(
 
     event_entry = {
 
-        "Source": "cloudmart.order",
+        "Source": source,
 
         "DetailType": detail_type,
 
@@ -565,6 +567,24 @@ def create_order(
 
 
         # =================================================
+        # INVENTORY UPDATED EVENT
+        # =================================================
+
+        publish_event(
+            "InventoryUpdated",
+            {
+                "product_id": product_id,
+                "product_name": product["name"],
+                "stock_count": new_stock,
+                "low_stock_threshold": inventory[
+                    "low_stock_threshold"
+                ]
+            },
+            source="cloudmart.product"
+        )
+
+
+        # =================================================
         # ORDER CONFIRMED EVENT
         # =================================================
 
@@ -669,6 +689,7 @@ def create_order(
             "quantity": quantity
         }))
 
+
         # ===============================================
         # PUBLISH ORDER FAILED EVENT
         # ===============================================
@@ -716,6 +737,7 @@ def create_order(
             "quantity": quantity,
             "error": str(error)
         }))
+
 
         # ===============================================
         # PUBLISH ORDER FAILED EVENT
