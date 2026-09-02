@@ -326,10 +326,12 @@ def lambda_handler(
                     FROM products p
                     LEFT JOIN inventory i
                         ON p.product_id = i.product_id
+                    WHERE p.is_deleted = FALSE
                     ORDER BY p.product_id
-                    """)
+                """)
 
                 products = cursor.fetchall()
+
 
                 log_event(
                     "products_retrieved",
@@ -338,6 +340,7 @@ def lambda_handler(
 
                     status="success"
                 )
+
 
                 return create_response(
                     200,
@@ -369,16 +372,21 @@ def lambda_handler(
                     LEFT JOIN inventory i
                         ON p.product_id = i.product_id
                     WHERE p.product_id = %s
+                      AND p.is_deleted = FALSE
                 """, (product_id,))
 
+
                 product = cursor.fetchone()
+
 
                 if not product:
 
                     log_event(
                         "product_not_found",
+
                         product_id=product_id
                     )
+
 
                     return create_response(
                         404,
@@ -396,6 +404,7 @@ def lambda_handler(
                     status="success"
                 )
 
+
                 return create_response(
                     200,
                     product
@@ -411,6 +420,7 @@ def lambda_handler(
                 body = event.get(
                     "body"
                 )
+
 
                 if not body:
 
@@ -472,6 +482,47 @@ def lambda_handler(
                     )
 
 
+                # =================================================
+                # VALIDATE PRICE
+                # =================================================
+
+                if isinstance(price, bool):
+
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "price must be a number"
+                        }
+                    )
+
+
+                try:
+
+                    price_value = float(price)
+
+                except (TypeError, ValueError):
+
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "price must be a number"
+                        }
+                    )
+
+
+                if price_value <= 0:
+
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "price must be greater than 0"
+                        }
+                    )
+
+
                 cursor.execute(
                     """
                     INSERT INTO products
@@ -492,13 +543,14 @@ def lambda_handler(
                     (
                         name,
                         description,
-                        price,
+                        price_value,
                         category
                     )
                 )
 
 
                 connection.commit()
+
 
                 new_product_id = cursor.lastrowid
 
@@ -536,6 +588,7 @@ def lambda_handler(
                 body = event.get(
                     "body"
                 )
+
 
                 if not body:
 
@@ -581,13 +634,14 @@ def lambda_handler(
                 # Correct database column:
                 # stock_count
                 #
-                # quantity is also accepted as a backwards-
-                # compatible API field.
+                # quantity is also accepted as a
+                # backwards-compatible API field.
                 # =================================================
 
                 stock_count = body.get(
                     "stock_count"
                 )
+
 
                 if stock_count is None:
 
@@ -597,7 +651,96 @@ def lambda_handler(
 
 
                 # =================================================
+                # VALIDATE PRICE
+                # =================================================
+
+                if price is not None:
+
+                    if isinstance(price, bool):
+
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "price must be a number"
+                            }
+                        )
+
+
+                    try:
+
+                        price_value = float(price)
+
+                    except (TypeError, ValueError):
+
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "price must be a number"
+                            }
+                        )
+
+
+                    if price_value <= 0:
+
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "price must be greater than 0"
+                            }
+                        )
+
+                else:
+
+                    price_value = price
+
+
+                # =================================================
+                # VALIDATE STOCK
+                # =================================================
+
+                if stock_count is not None:
+
+                    # bool is technically an int in Python,
+                    # so explicitly reject it.
+                    if (
+                        not isinstance(
+                            stock_count,
+                            int
+                        )
+                        or isinstance(
+                            stock_count,
+                            bool
+                        )
+                    ):
+
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "stock_count must be an integer"
+                            }
+                        )
+
+
+                    if stock_count < 0:
+
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "stock_count cannot be negative"
+                            }
+                        )
+
+
+                # =================================================
                 # UPDATE PRODUCT
+                #
+                # is_deleted = FALSE ensures that a
+                # soft-deleted product cannot be updated.
                 # =================================================
 
                 cursor.execute(
@@ -609,11 +752,12 @@ def lambda_handler(
                         price = %s,
                         category = %s
                     WHERE product_id = %s
+                      AND is_deleted = FALSE
                     """,
                     (
                         name,
                         description,
-                        price,
+                        price_value,
                         category,
                         product_id
                     )
@@ -624,11 +768,13 @@ def lambda_handler(
 
                     connection.rollback()
 
+
                     log_event(
                         "product_not_found",
 
                         product_id=product_id
                     )
+
 
                     return create_response(
                         404,
@@ -668,11 +814,13 @@ def lambda_handler(
 
                         connection.rollback()
 
+
                         log_event(
                             "inventory_not_found",
 
                             product_id=product_id
                         )
+
 
                         return create_response(
                             404,
@@ -703,6 +851,7 @@ def lambda_handler(
                             ON p.product_id =
                                i.product_id
                         WHERE p.product_id = %s
+                          AND p.is_deleted = FALSE
                         """,
                         (product_id,)
                     )
@@ -715,11 +864,13 @@ def lambda_handler(
 
                         connection.rollback()
 
+
                         log_event(
                             "inventory_information_not_found",
 
                             product_id=product_id
                         )
+
 
                         return create_response(
                             404,
@@ -836,7 +987,7 @@ def lambda_handler(
 
 
             # =================================================
-            # DELETE PRODUCT
+            # DELETE PRODUCT - SOFT DELETE
             # =================================================
 
             if (
@@ -846,8 +997,11 @@ def lambda_handler(
 
                 cursor.execute(
                     """
-                    DELETE FROM products
+                    UPDATE products
+                    SET
+                        is_deleted = TRUE
                     WHERE product_id = %s
+                      AND is_deleted = FALSE
                     """,
                     (product_id,)
                 )
@@ -857,11 +1011,13 @@ def lambda_handler(
 
                     connection.rollback()
 
+
                     log_event(
                         "product_not_found",
 
                         product_id=product_id
                     )
+
 
                     return create_response(
                         404,
@@ -929,9 +1085,11 @@ def lambda_handler(
             status="failed"
         )
 
+
         if connection:
 
             connection.rollback()
+
 
         return create_response(
             400,
