@@ -450,10 +450,104 @@ def create_order(
 
             if inventory["stock_count"] < quantity:
 
-                raise ValueError(
+                failure_reason = (
                     f"Insufficient stock. "
                     f"Available: {inventory['stock_count']}, "
                     f"Requested: {quantity}"
+                )
+
+                # Calculate total even for failed order
+                total_amount = (
+                    product["price"]
+                    * quantity
+                )
+
+                # =============================================
+                # INSERT FAILED ORDER
+                # =============================================
+
+                cursor.execute(
+                    """
+                    INSERT INTO orders
+                        (
+                            customer_id,
+                            product_id,
+                            quantity,
+                            total_amount,
+                            status,
+                            failure_reason
+                        )
+                    VALUES
+                        (
+                            %s,
+                            %s,
+                            %s,
+                            %s,
+                            %s,
+                            %s
+                        )
+                    """,
+                    (
+                        customer_id,
+                        product_id,
+                        quantity,
+                        total_amount,
+                        "FAILED",
+                        failure_reason
+                    )
+                )
+
+                order_id = cursor.lastrowid
+
+                # =============================================
+                # COMMIT FAILED ORDER
+                # =============================================
+
+                connection.commit()
+
+                print(json.dumps({
+                    "event": "order_failed",
+                    "order_id": order_id,
+                    "customer_id": customer_id,
+                    "product_id": product_id,
+                    "quantity": quantity,
+                    "reason": failure_reason
+                }))
+
+                # =============================================
+                # ORDER FAILED EVENT
+                # =============================================
+
+                try:
+
+                    publish_event(
+                        "OrderFailed",
+                        {
+                            "order_id": order_id,
+                            "customer_id": customer_id,
+                            "product_id": product_id,
+                            "quantity": quantity,
+                            "status": "FAILED",
+                            "reason": failure_reason
+                        }
+                    )
+
+                except Exception as event_error:
+
+                    print(json.dumps({
+                        "event": "order_failed_event_error",
+                        "order_id": order_id,
+                        "error": str(event_error)
+                    }))
+
+                return response(
+                    400,
+                    {
+                        "message": "Order could not be processed",
+                        "order_id": order_id,
+                        "status": "FAILED",
+                        "reason": failure_reason
+                    }
                 )
 
 
@@ -846,6 +940,7 @@ def get_order_by_id(
                     o.quantity,
                     o.total_amount,
                     o.status,
+                    o.failure_reason,
                     o.created_at,
                     o.updated_at
                 FROM orders o
@@ -1032,6 +1127,7 @@ def get_orders(
                         o.quantity,
                         o.total_amount,
                         o.status,
+                        o.failure_reason,
                         o.created_at,
                         o.updated_at
                     FROM orders o
@@ -1060,6 +1156,7 @@ def get_orders(
                         o.quantity,
                         o.total_amount,
                         o.status,
+                        o.failure_reason,
                         o.created_at,
                         o.updated_at
                     FROM orders o

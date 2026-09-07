@@ -307,5 +307,51 @@ WHERE name = 'Keyboard'
   );
 
 
-  ALTER TABLE products
-ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+
+
+
+
+-- =====================================================
+-- ORDERS FAILURE REASON COLUMN
+-- =====================================================
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'orders'
+      AND column_name = 'failure_reason'
+);
+
+SET @sql = IF(
+    @column_exists = 0,
+    'ALTER TABLE orders ADD COLUMN failure_reason VARCHAR(500) NULL AFTER status',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- PRODUCTS SOFT DELETE COLUMN
+-- =====================================================
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'products'
+      AND column_name = 'is_deleted'
+);
+
+SET @sql = IF(
+    @column_exists = 0,
+    'ALTER TABLE products ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
