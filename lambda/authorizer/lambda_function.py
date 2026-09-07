@@ -1,7 +1,7 @@
 import json
 import os
-import boto3
-import hmac
+import boto3 #Communicates with AWS services
+import hmac #Secure token comparison
 
 
 # =========================================================
@@ -14,7 +14,7 @@ ssm = boto3.client("ssm")
 # =========================================================
 # ENVIRONMENT VARIABLES
 # =========================================================
-
+#contain the paths of the SSM parameters.
 USER_TOKEN_PARAMETER = os.environ["USER_TOKEN_PARAMETER"]
 
 ADMIN_TOKEN_PARAMETER = os.environ["ADMIN_TOKEN_PARAMETER"]
@@ -84,9 +84,9 @@ def create_policy(
 # =========================================================
 # CREATE API ARN BASE
 # =========================================================
-
+#API Gateway sends the Authorizer something called
 def get_api_arn_base(method_arn):
-
+#It identifies the specific API request
     """
     Example methodArn:
 

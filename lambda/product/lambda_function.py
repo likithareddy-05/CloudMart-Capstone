@@ -18,12 +18,18 @@ events = boto3.client("events")
 # =========================================================
 
 def log_event(event_name, **kwargs):
+
     log_data = {
         "event": event_name,
         **kwargs
     }
 
-    print(json.dumps(log_data, default=str))
+    print(
+        json.dumps(
+            log_data,
+            default=str
+        )
+    )
 
 
 # =========================================================
@@ -54,6 +60,7 @@ def get_database_credentials():
     prefix = f"/cloudmart/{environment}/db"
 
     return {
+
         "host": get_parameter(
             f"{prefix}/host"
         ),
@@ -87,20 +94,29 @@ def get_connection():
     db = get_database_credentials()
 
     return pymysql.connect(
+
         host=db["host"],
+
         port=db["port"],
+
         user=db["username"],
+
         password=db["password"],
+
         database=db["database"],
+
         cursorclass=pymysql.cursors.DictCursor,
+
         connect_timeout=10,
+
         read_timeout=30,
+
         write_timeout=30
     )
 
 
 # =========================================================
-# PUBLISH INVENTORY EVENT
+# PUBLISH INVENTORY UPDATED EVENT
 # =========================================================
 
 def publish_inventory_event(
@@ -116,13 +132,17 @@ def publish_inventory_event(
 
     event_detail = {
 
-        "product_id": product_id,
+        "product_id":
+            product_id,
 
-        "product_name": product_name,
+        "product_name":
+            product_name,
 
-        "stock_count": stock_count,
+        "stock_count":
+            stock_count,
 
-        "low_stock_threshold": low_stock_threshold
+        "low_stock_threshold":
+            low_stock_threshold
     }
 
     response = events.put_events(
@@ -130,16 +150,21 @@ def publish_inventory_event(
         Entries=[
 
             {
-                "EventBusName": event_bus_name,
 
-                "Source": "cloudmart.product",
+                "EventBusName":
+                    event_bus_name,
 
-                "DetailType": "InventoryUpdated",
+                "Source":
+                    "cloudmart.product",
 
-                "Detail": json.dumps(
-                    event_detail,
-                    default=str
-                )
+                "DetailType":
+                    "InventoryUpdated",
+
+                "Detail":
+                    json.dumps(
+                        event_detail,
+                        default=str
+                    )
             }
         ]
     )
@@ -147,6 +172,7 @@ def publish_inventory_event(
     if response["FailedEntryCount"] > 0:
 
         log_event(
+
             "inventory_event_publish_failed",
 
             product_id=product_id,
@@ -161,6 +187,7 @@ def publish_inventory_event(
         )
 
     log_event(
+
         "inventory_event_published",
 
         product_id=product_id,
@@ -169,7 +196,8 @@ def publish_inventory_event(
 
         stock_count=stock_count,
 
-        low_stock_threshold=low_stock_threshold,
+        low_stock_threshold=
+            low_stock_threshold,
 
         event_bus=event_bus_name,
 
@@ -188,18 +216,109 @@ def create_response(
 
     return {
 
-        "statusCode": status_code,
+        "statusCode":
+            status_code,
 
         "headers": {
 
-            "Content-Type": "application/json"
+            "Content-Type":
+                "application/json"
         },
 
-        "body": json.dumps(
-            body,
-            default=str
-        )
+        "body":
+            json.dumps(
+                body,
+                default=str
+            )
     }
+
+
+# =========================================================
+# GET HTTP METHOD
+# =========================================================
+
+def get_http_method(event):
+
+    method = event.get(
+        "httpMethod"
+    )
+
+    if method:
+        return method.upper()
+
+    method = (
+        event.get(
+            "requestContext",
+            {}
+        )
+        .get(
+            "http",
+            {}
+        )
+        .get(
+            "method"
+        )
+    )
+
+    if method:
+        return method.upper()
+
+    return None
+
+
+# =========================================================
+# GET PRODUCT ID
+# =========================================================
+
+def get_product_id(event):
+
+    path_parameters = (
+        event.get(
+            "pathParameters"
+        )
+        or {}
+    )
+
+    return path_parameters.get(
+        "id"
+    )
+
+
+# =========================================================
+# PARSE REQUEST BODY
+# =========================================================
+
+def get_request_body(event):
+
+    body = event.get(
+        "body"
+    )
+
+    if not body:
+
+        raise ValueError(
+            "Request body is required"
+        )
+
+    if isinstance(
+        body,
+        str
+    ):
+
+        body = json.loads(
+            body
+        )
+
+    if not isinstance(
+        body,
+        dict
+    ):
+
+        raise ValueError(
+            "Request body must be a JSON object"
+        )
+
+    return body
 
 
 # =========================================================
@@ -228,59 +347,37 @@ def lambda_handler(
         # GET HTTP METHOD
         # =================================================
 
-        http_method = event.get(
-            "httpMethod"
+        http_method = get_http_method(
+            event
         )
 
         if not http_method:
 
-            http_method = (
-                event.get(
-                    "requestContext",
-                    {}
-                )
-                .get(
-                    "http",
-                    {}
-                )
-                .get(
-                    "method"
-                )
-            )
-
-
-        if not http_method:
-
             return create_response(
+
                 400,
+
                 {
-                    "message": "HTTP method is missing"
+                    "message":
+                        "HTTP method is missing"
                 }
             )
 
 
-        http_method = http_method.upper()
-
-
         log_event(
+
             "http_method",
+
             method=http_method
         )
 
 
         # =================================================
-        # GET PATH PARAMETERS
+        # GET PRODUCT ID
         # =================================================
 
-        path_parameters = (
-            event.get(
-                "pathParameters"
-            )
-            or {}
-        )
-
-        product_id = path_parameters.get(
-            "id"
+        product_id = get_product_id(
+            event
         )
 
 
@@ -291,7 +388,9 @@ def lambda_handler(
         connection = get_connection()
 
         log_event(
+
             "rds_connection",
+
             status="success"
         )
 
@@ -312,7 +411,9 @@ def lambda_handler(
                 and not product_id
             ):
 
-                cursor.execute("""
+                cursor.execute(
+
+                    """
                     SELECT
                         p.product_id,
                         p.name,
@@ -325,15 +426,17 @@ def lambda_handler(
                         p.updated_at
                     FROM products p
                     LEFT JOIN inventory i
-                        ON p.product_id = i.product_id
+                        ON p.product_id =
+                           i.product_id
                     WHERE p.is_deleted = FALSE
                     ORDER BY p.product_id
-                """)
+                    """
+                )
 
                 products = cursor.fetchall()
 
-
                 log_event(
+
                     "products_retrieved",
 
                     count=len(products),
@@ -341,9 +444,10 @@ def lambda_handler(
                     status="success"
                 )
 
-
                 return create_response(
+
                     200,
+
                     products
                 )
 
@@ -357,7 +461,9 @@ def lambda_handler(
                 and product_id
             ):
 
-                cursor.execute("""
+                cursor.execute(
+
+                    """
                     SELECT
                         p.product_id,
                         p.name,
@@ -370,33 +476,38 @@ def lambda_handler(
                         p.updated_at
                     FROM products p
                     LEFT JOIN inventory i
-                        ON p.product_id = i.product_id
+                        ON p.product_id =
+                           i.product_id
                     WHERE p.product_id = %s
                       AND p.is_deleted = FALSE
-                """, (product_id,))
+                    """,
 
+                    (product_id,)
+                )
 
                 product = cursor.fetchone()
-
 
                 if not product:
 
                     log_event(
+
                         "product_not_found",
 
                         product_id=product_id
                     )
 
-
                     return create_response(
+
                         404,
+
                         {
-                            "message": "Product not found"
+                            "message":
+                                "Product not found"
                         }
                     )
 
-
                 log_event(
+
                     "product_retrieved",
 
                     product_id=product_id,
@@ -404,9 +515,10 @@ def lambda_handler(
                     status="success"
                 )
 
-
                 return create_response(
+
                     200,
+
                     product
                 )
 
@@ -417,31 +529,14 @@ def lambda_handler(
 
             if http_method == "POST":
 
-                body = event.get(
-                    "body"
+                body = get_request_body(
+                    event
                 )
 
 
-                if not body:
-
-                    return create_response(
-                        400,
-                        {
-                            "message":
-                                "Request body is required"
-                        }
-                    )
-
-
-                if isinstance(
-                    body,
-                    str
-                ):
-
-                    body = json.loads(
-                        body
-                    )
-
+                # =================================================
+                # PRODUCT FIELDS
+                # =================================================
 
                 name = body.get(
                     "name"
@@ -460,21 +555,57 @@ def lambda_handler(
                 )
 
 
-                if not name:
+                # =================================================
+                # INVENTORY FIELDS
+                # =================================================
+
+                stock_count = body.get(
+                    "stock_count",
+                    0
+                )
+
+                low_stock_threshold = body.get(
+                    "low_stock_threshold",
+                    10
+                )
+
+
+                # =================================================
+                # VALIDATE NAME
+                # =================================================
+
+                if (
+                    name is None
+                    or not isinstance(
+                        name,
+                        str
+                    )
+                    or not name.strip()
+                ):
 
                     return create_response(
+
                         400,
+
                         {
                             "message":
                                 "name is required"
                         }
                     )
 
+                name = name.strip()
+
+
+                # =================================================
+                # VALIDATE PRICE
+                # =================================================
 
                 if price is None:
 
                     return create_response(
+
                         400,
+
                         {
                             "message":
                                 "price is required"
@@ -482,14 +613,15 @@ def lambda_handler(
                     )
 
 
-                # =================================================
-                # VALIDATE PRICE
-                # =================================================
-
-                if isinstance(price, bool):
+                if isinstance(
+                    price,
+                    bool
+                ):
 
                     return create_response(
+
                         400,
+
                         {
                             "message":
                                 "price must be a number"
@@ -499,12 +631,19 @@ def lambda_handler(
 
                 try:
 
-                    price_value = float(price)
+                    price_value = float(
+                        price
+                    )
 
-                except (TypeError, ValueError):
+                except (
+                    TypeError,
+                    ValueError
+                ):
 
                     return create_response(
+
                         400,
+
                         {
                             "message":
                                 "price must be a number"
@@ -515,7 +654,9 @@ def lambda_handler(
                 if price_value <= 0:
 
                     return create_response(
+
                         400,
+
                         {
                             "message":
                                 "price must be greater than 0"
@@ -523,7 +664,92 @@ def lambda_handler(
                     )
 
 
+                # =================================================
+                # VALIDATE STOCK COUNT
+                # =================================================
+
+                if (
+                    not isinstance(
+                        stock_count,
+                        int
+                    )
+                    or isinstance(
+                        stock_count,
+                        bool
+                    )
+                ):
+
+                    return create_response(
+
+                        400,
+
+                        {
+                            "message":
+                                "stock_count must be an integer"
+                        }
+                    )
+
+
+                if stock_count < 0:
+
+                    return create_response(
+
+                        400,
+
+                        {
+                            "message":
+                                "stock_count cannot be negative"
+                        }
+                    )
+
+
+                # =================================================
+                # VALIDATE LOW STOCK THRESHOLD
+                # =================================================
+
+                if (
+                    not isinstance(
+                        low_stock_threshold,
+                        int
+                    )
+                    or isinstance(
+                        low_stock_threshold,
+                        bool
+                    )
+                ):
+
+                    return create_response(
+
+                        400,
+
+                        {
+                            "message":
+                                "low_stock_threshold "
+                                "must be an integer"
+                        }
+                    )
+
+
+                if low_stock_threshold < 0:
+
+                    return create_response(
+
+                        400,
+
+                        {
+                            "message":
+                                "low_stock_threshold "
+                                "cannot be negative"
+                        }
+                    )
+
+
+                # =================================================
+                # INSERT PRODUCT
+                # =================================================
+
                 cursor.execute(
+
                     """
                     INSERT INTO products
                     (
@@ -540,6 +766,7 @@ def lambda_handler(
                         %s
                     )
                     """,
+
                     (
                         name,
                         description,
@@ -549,29 +776,109 @@ def lambda_handler(
                 )
 
 
+                new_product_id = (
+                    cursor.lastrowid
+                )
+
+
+                # =================================================
+                # INSERT INVENTORY
+                # =================================================
+
+                cursor.execute(
+
+                    """
+                    INSERT INTO inventory
+                    (
+                        product_id,
+                        stock_count,
+                        low_stock_threshold
+                    )
+                    VALUES
+                    (
+                        %s,
+                        %s,
+                        %s
+                    )
+                    """,
+
+                    (
+                        new_product_id,
+                        stock_count,
+                        low_stock_threshold
+                    )
+                )
+
+
+                # =================================================
+                # COMMIT
+                # =================================================
+
                 connection.commit()
 
 
-                new_product_id = cursor.lastrowid
+                # =================================================
+                # PUBLISH EVENT
+                # =================================================
 
+                publish_inventory_event(
+
+                    product_id=
+                        new_product_id,
+
+                    product_name=
+                        name,
+
+                    stock_count=
+                        stock_count,
+
+                    low_stock_threshold=
+                        low_stock_threshold
+                )
+
+
+                # =================================================
+                # LOG
+                # =================================================
 
                 log_event(
+
                     "product_created",
 
-                    product_id=new_product_id,
+                    product_id=
+                        new_product_id,
+
+                    stock_count=
+                        stock_count,
+
+                    low_stock_threshold=
+                        low_stock_threshold,
 
                     status="success"
                 )
 
 
+                # =================================================
+                # RESPONSE
+                # =================================================
+
                 return create_response(
+
                     201,
+
                     {
+
                         "message":
                             "Product created successfully",
 
                         "product_id":
-                            new_product_id
+                            new_product_id,
+
+                        "stock_count":
+                            stock_count,
+
+                        "low_stock_threshold":
+                            low_stock_threshold
                     }
                 )
 
@@ -585,31 +892,14 @@ def lambda_handler(
                 and product_id
             ):
 
-                body = event.get(
-                    "body"
+                body = get_request_body(
+                    event
                 )
 
 
-                if not body:
-
-                    return create_response(
-                        400,
-                        {
-                            "message":
-                                "Request body is required"
-                        }
-                    )
-
-
-                if isinstance(
-                    body,
-                    str
-                ):
-
-                    body = json.loads(
-                        body
-                    )
-
+                # =================================================
+                # PRODUCT FIELDS
+                # =================================================
 
                 name = body.get(
                     "name"
@@ -629,25 +919,42 @@ def lambda_handler(
 
 
                 # =================================================
-                # INVENTORY FIELD
-                #
-                # Correct database column:
-                # stock_count
-                #
-                # quantity is also accepted as a
-                # backwards-compatible API field.
+                # INVENTORY FIELDS
                 # =================================================
 
                 stock_count = body.get(
                     "stock_count"
                 )
 
+                low_stock_threshold = body.get(
+                    "low_stock_threshold"
+                )
 
-                if stock_count is None:
 
-                    stock_count = body.get(
-                        "quantity"
+                # =================================================
+                # VALIDATE NAME
+                # =================================================
+
+                if (
+                    name is None
+                    or not isinstance(
+                        name,
+                        str
                     )
+                    or not name.strip()
+                ):
+
+                    return create_response(
+
+                        400,
+
+                        {
+                            "message":
+                                "name is required"
+                        }
+                    )
+
+                name = name.strip()
 
 
                 # =================================================
@@ -656,10 +963,15 @@ def lambda_handler(
 
                 if price is not None:
 
-                    if isinstance(price, bool):
+                    if isinstance(
+                        price,
+                        bool
+                    ):
 
                         return create_response(
+
                             400,
+
                             {
                                 "message":
                                     "price must be a number"
@@ -669,12 +981,19 @@ def lambda_handler(
 
                     try:
 
-                        price_value = float(price)
+                        price_value = float(
+                            price
+                        )
 
-                    except (TypeError, ValueError):
+                    except (
+                        TypeError,
+                        ValueError
+                    ):
 
                         return create_response(
+
                             400,
+
                             {
                                 "message":
                                     "price must be a number"
@@ -685,7 +1004,9 @@ def lambda_handler(
                     if price_value <= 0:
 
                         return create_response(
+
                             400,
+
                             {
                                 "message":
                                     "price must be greater than 0"
@@ -694,17 +1015,15 @@ def lambda_handler(
 
                 else:
 
-                    price_value = price
+                    price_value = None
 
 
                 # =================================================
-                # VALIDATE STOCK
+                # VALIDATE STOCK COUNT
                 # =================================================
 
                 if stock_count is not None:
 
-                    # bool is technically an int in Python,
-                    # so explicitly reject it.
                     if (
                         not isinstance(
                             stock_count,
@@ -717,10 +1036,13 @@ def lambda_handler(
                     ):
 
                         return create_response(
+
                             400,
+
                             {
                                 "message":
-                                    "stock_count must be an integer"
+                                    "stock_count "
+                                    "must be an integer"
                             }
                         )
 
@@ -728,56 +1050,109 @@ def lambda_handler(
                     if stock_count < 0:
 
                         return create_response(
+
                             400,
+
                             {
                                 "message":
-                                    "stock_count cannot be negative"
+                                    "stock_count "
+                                    "cannot be negative"
                             }
                         )
 
 
                 # =================================================
-                # UPDATE PRODUCT
-                #
-                # is_deleted = FALSE ensures that a
-                # soft-deleted product cannot be updated.
+                # VALIDATE LOW STOCK THRESHOLD
                 # =================================================
 
+                if low_stock_threshold is not None:
+
+                    if (
+                        not isinstance(
+                            low_stock_threshold,
+                            int
+                        )
+                        or isinstance(
+                            low_stock_threshold,
+                            bool
+                        )
+                    ):
+
+                        return create_response(
+
+                            400,
+
+                            {
+                                "message":
+                                    "low_stock_threshold "
+                                    "must be an integer"
+                            }
+                        )
+
+
+                    if low_stock_threshold < 0:
+
+                        return create_response(
+
+                            400,
+
+                            {
+                                "message":
+                                    "low_stock_threshold "
+                                    "cannot be negative"
+                            }
+                        )
+
+
+                # =================================================
+                # CHECK PRODUCT EXISTS
+                # =================================================
+
+                # IMPORTANT:
+                #
+                # Do NOT use cursor.rowcount from the UPDATE
+                # to determine whether the product exists.
+                #
+                # MySQL can return rowcount = 0 when the new
+                # values are exactly the same as the old values.
+                #
+                # Therefore we check existence FIRST.
+
                 cursor.execute(
+
                     """
-                    UPDATE products
-                    SET
-                        name = %s,
-                        description = %s,
-                        price = %s,
-                        category = %s
+                    SELECT
+                        product_id
+                    FROM products
                     WHERE product_id = %s
                       AND is_deleted = FALSE
                     """,
-                    (
-                        name,
-                        description,
-                        price_value,
-                        category,
-                        product_id
-                    )
+
+                    (product_id,)
                 )
 
 
-                if cursor.rowcount == 0:
+                existing_product = (
+                    cursor.fetchone()
+                )
+
+
+                if not existing_product:
 
                     connection.rollback()
 
-
                     log_event(
+
                         "product_not_found",
 
-                        product_id=product_id
+                        product_id=
+                            product_id
                     )
 
-
                     return create_response(
+
                         404,
+
                         {
                             "message":
                                 "Product not found"
@@ -785,45 +1160,133 @@ def lambda_handler(
                     )
 
 
-                inventory_event = None
+                # =================================================
+                # UPDATE PRODUCT
+                # =================================================
+
+                # Build the update dynamically so that if price,
+                # description or category are not supplied, their
+                # existing values remain unchanged.
+
+                update_fields = [
+                    "name = %s"
+                ]
+
+                update_values = [
+                    name
+                ]
+
+
+                if description is not None:
+
+                    update_fields.append(
+                        "description = %s"
+                    )
+
+                    update_values.append(
+                        description
+                    )
+
+
+                if price_value is not None:
+
+                    update_fields.append(
+                        "price = %s"
+                    )
+
+                    update_values.append(
+                        price_value
+                    )
+
+
+                if category is not None:
+
+                    update_fields.append(
+                        "category = %s"
+                    )
+
+                    update_values.append(
+                        category
+                    )
+
+
+                update_values.append(
+                    product_id
+                )
+
+
+                product_update_sql = f"""
+                    UPDATE products
+                    SET
+                        {", ".join(update_fields)}
+                    WHERE product_id = %s
+                      AND is_deleted = FALSE
+                """
+
+
+                cursor.execute(
+
+                    product_update_sql,
+
+                    tuple(
+                        update_values
+                    )
+                )
 
 
                 # =================================================
                 # UPDATE INVENTORY
                 # =================================================
 
-                if stock_count is not None:
+                inventory_event = None
+
+
+                if (
+                    stock_count is not None
+                    or low_stock_threshold is not None
+                ):
+
+
+                    # =================================================
+                    # CHECK INVENTORY EXISTS
+                    # =================================================
 
                     cursor.execute(
+
                         """
-                        UPDATE inventory
-                        SET
-                            stock_count = %s,
-                            updated_at =
-                                CURRENT_TIMESTAMP
+                        SELECT
+                            inventory_id,
+                            stock_count,
+                            low_stock_threshold
+                        FROM inventory
                         WHERE product_id = %s
                         """,
-                        (
-                            stock_count,
-                            product_id
-                        )
+
+                        (product_id,)
                     )
 
 
-                    if cursor.rowcount == 0:
+                    existing_inventory = (
+                        cursor.fetchone()
+                    )
+
+
+                    if not existing_inventory:
 
                         connection.rollback()
 
-
                         log_event(
+
                             "inventory_not_found",
 
-                            product_id=product_id
+                            product_id=
+                                product_id
                         )
 
-
                         return create_response(
+
                             404,
+
                             {
                                 "message":
                                     "Inventory record not found"
@@ -832,15 +1295,70 @@ def lambda_handler(
 
 
                     # =================================================
-                    # GET INVENTORY DETAILS
-                    #
-                    # Correct database columns:
-                    #
-                    # stock_count
-                    # low_stock_threshold
+                    # UPDATE INVENTORY
+                    # =================================================
+
+                    inventory_fields = []
+
+                    inventory_values = []
+
+
+                    if stock_count is not None:
+
+                        inventory_fields.append(
+                            "stock_count = %s"
+                        )
+
+                        inventory_values.append(
+                            stock_count
+                        )
+
+
+                    if low_stock_threshold is not None:
+
+                        inventory_fields.append(
+                            "low_stock_threshold = %s"
+                        )
+
+                        inventory_values.append(
+                            low_stock_threshold
+                        )
+
+
+                    inventory_fields.append(
+                        "updated_at = CURRENT_TIMESTAMP"
+                    )
+
+
+                    inventory_values.append(
+                        product_id
+                    )
+
+
+                    inventory_update_sql = f"""
+                        UPDATE inventory
+                        SET
+                            {", ".join(inventory_fields)}
+                        WHERE product_id = %s
+                    """
+
+
+                    cursor.execute(
+
+                        inventory_update_sql,
+
+                        tuple(
+                            inventory_values
+                        )
+                    )
+
+
+                    # =================================================
+                    # GET UPDATED INVENTORY
                     # =================================================
 
                     cursor.execute(
+
                         """
                         SELECT
                             p.name,
@@ -853,27 +1371,24 @@ def lambda_handler(
                         WHERE p.product_id = %s
                           AND p.is_deleted = FALSE
                         """,
+
                         (product_id,)
                     )
 
 
-                    inventory = cursor.fetchone()
+                    inventory = (
+                        cursor.fetchone()
+                    )
 
 
                     if not inventory:
 
                         connection.rollback()
 
-
-                        log_event(
-                            "inventory_information_not_found",
-
-                            product_id=product_id
-                        )
-
-
                         return create_response(
+
                             404,
+
                             {
                                 "message":
                                     "Inventory information not found"
@@ -887,10 +1402,14 @@ def lambda_handler(
                             product_id,
 
                         "product_name":
-                            inventory["name"],
+                            inventory[
+                                "name"
+                            ],
 
                         "stock_count":
-                            inventory["stock_count"],
+                            inventory[
+                                "stock_count"
+                            ],
 
                         "low_stock_threshold":
                             inventory[
@@ -900,9 +1419,11 @@ def lambda_handler(
 
 
                     log_event(
+
                         "inventory_updated",
 
-                        product_id=product_id,
+                        product_id=
+                            product_id,
 
                         stock_count=
                             inventory[
@@ -919,14 +1440,14 @@ def lambda_handler(
 
 
                 # =================================================
-                # COMMIT DATABASE CHANGES
+                # COMMIT
                 # =================================================
 
                 connection.commit()
 
 
                 # =================================================
-                # PUBLISH EVENT
+                # PUBLISH INVENTORY EVENT
                 # =================================================
 
                 if inventory_event:
@@ -956,32 +1477,47 @@ def lambda_handler(
 
 
                 # =================================================
-                # PRODUCT UPDATE LOG
+                # LOG PRODUCT UPDATE
                 # =================================================
 
                 log_event(
+
                     "product_updated",
 
-                    product_id=product_id,
+                    product_id=
+                        product_id,
 
-                    inventory_updated=
-                        stock_count is not None,
+                    inventory_updated=(
+                        stock_count is not None
+                        or
+                        low_stock_threshold is not None
+                    ),
 
                     status="success"
                 )
 
 
+                # =================================================
+                # RESPONSE
+                # =================================================
+
                 return create_response(
+
                     200,
+
                     {
+
                         "message":
                             "Product updated successfully",
 
                         "product_id":
                             product_id,
 
-                        "inventory_updated":
+                        "inventory_updated": (
                             stock_count is not None
+                            or
+                            low_stock_threshold is not None
+                        )
                     }
                 )
 
@@ -995,32 +1531,42 @@ def lambda_handler(
                 and product_id
             ):
 
+                # First check product exists
                 cursor.execute(
+
                     """
-                    UPDATE products
-                    SET
-                        is_deleted = TRUE
+                    SELECT
+                        product_id
+                    FROM products
                     WHERE product_id = %s
                       AND is_deleted = FALSE
                     """,
+
                     (product_id,)
                 )
 
 
-                if cursor.rowcount == 0:
+                existing_product = (
+                    cursor.fetchone()
+                )
+
+
+                if not existing_product:
 
                     connection.rollback()
 
-
                     log_event(
+
                         "product_not_found",
 
-                        product_id=product_id
+                        product_id=
+                            product_id
                     )
 
-
                     return create_response(
+
                         404,
+
                         {
                             "message":
                                 "Product not found"
@@ -1028,21 +1574,44 @@ def lambda_handler(
                     )
 
 
+                # =================================================
+                # SOFT DELETE
+                # =================================================
+
+                cursor.execute(
+
+                    """
+                    UPDATE products
+                    SET
+                        is_deleted = TRUE
+                    WHERE product_id = %s
+                      AND is_deleted = FALSE
+                    """,
+
+                    (product_id,)
+                )
+
+
                 connection.commit()
 
 
                 log_event(
+
                     "product_deleted",
 
-                    product_id=product_id,
+                    product_id=
+                        product_id,
 
                     status="success"
                 )
 
 
                 return create_response(
+
                     200,
+
                     {
+
                         "message":
                             "Product deleted successfully",
 
@@ -1057,6 +1626,7 @@ def lambda_handler(
             # =================================================
 
             log_event(
+
                 "method_not_allowed",
 
                 method=http_method,
@@ -1066,7 +1636,9 @@ def lambda_handler(
 
 
             return create_response(
+
                 405,
+
                 {
                     "message":
                         "Method not allowed"
@@ -1075,27 +1647,59 @@ def lambda_handler(
 
 
     # =========================================================
-    # INVALID JSON
+    # INVALID JSON / REQUEST BODY
     # =========================================================
 
     except json.JSONDecodeError:
 
         log_event(
+
             "invalid_json",
+
             status="failed"
         )
-
 
         if connection:
 
             connection.rollback()
 
-
         return create_response(
+
             400,
+
             {
                 "message":
                     "Invalid JSON body"
+            }
+        )
+
+
+    # =========================================================
+    # VALIDATION ERROR
+    # =========================================================
+
+    except ValueError as error:
+
+        log_event(
+
+            "validation_error",
+
+            error=str(error),
+
+            status="failed"
+        )
+
+        if connection:
+
+            connection.rollback()
+
+        return create_response(
+
+            400,
+
+            {
+                "message":
+                    str(error)
             }
         )
 
@@ -1107,6 +1711,7 @@ def lambda_handler(
     except Exception as error:
 
         log_event(
+
             "product_request_failed",
 
             error=str(error),
@@ -1114,14 +1719,14 @@ def lambda_handler(
             status="failed"
         )
 
-
         if connection:
 
             connection.rollback()
 
-
         return create_response(
+
             500,
+
             {
                 "message":
                     "Internal server error"

@@ -20,7 +20,7 @@ Parameters:
       - test
       - prod
 
-
+#Where is the Schema Runner Lambda ZIP file located in S3
   LambdaS3Key:
     Type: String
     Default: schema/schema-runner.zip

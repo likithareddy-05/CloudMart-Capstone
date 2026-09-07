@@ -1,10 +1,10 @@
 import json
 import os
-
+#to setup database schema
 import boto3
 import pymysql
 
-
+#Gets DB credentials from SSM
 ssm = boto3.client("ssm")
 
 
@@ -31,14 +31,14 @@ def get_database_credentials():
         "password": get_parameter(f"{prefix}/password")
     }
 
-
+#Connects to RDS MySQL
 def execute_schema(connection):
 
     schema_path = os.path.join(
         os.path.dirname(__file__),
         "schema.sql"
     )
-
+#Reads schema.sql
     with open(schema_path, "r", encoding="utf-8") as file:
         sql = file.read()
 
@@ -46,7 +46,7 @@ def execute_schema(connection):
     lines = []
 
     for line in sql.splitlines():
-
+#Splits SQL statements
         stripped = line.strip()
 
         if stripped.startswith("--"):
@@ -62,7 +62,7 @@ def execute_schema(connection):
         for statement in cleaned_sql.split(";")
         if statement.strip()
     ]
-
+#Executes them
     with connection.cursor() as cursor:
 
         for statement in statements:
@@ -158,7 +158,7 @@ def lambda_handler(event, context):
             connection.rollback()
 
         raise
-
+#Commits transaction
     finally:
 
         if connection:
