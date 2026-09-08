@@ -44,6 +44,25 @@ Parameters:
       SSM Parameter Store path containing the
       ADMIN authentication token.
 
+  UserIdParameterName:
+    Type: String
+
+    Default: /cloudmart/dev/auth/user-id
+
+    Description: >
+      SSM Parameter Store path containing the
+      USER database user ID.
+
+
+  AdminIdParameterName:
+    Type: String
+
+    Default: /cloudmart/dev/auth/admin-id
+
+    Description: >
+      SSM Parameter Store path containing the
+      ADMIN database user ID.
+
 
   LambdaS3Key:
     Type: String
@@ -160,6 +179,16 @@ Resources:
                     - arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}
                     - ParameterName: !Ref AdminTokenParameterName
 
+                  # USER ID
+                  - !Sub
+                    - arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}
+                    - ParameterName: !Ref UserIdParameterName
+
+                  # ADMIN ID
+                  - !Sub
+                    - arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}
+                    - ParameterName: !Ref AdminIdParameterName
+
 
   # =======================================================
   # AUTHORIZER LAMBDA
@@ -199,6 +228,12 @@ Resources:
 
           ADMIN_TOKEN_PARAMETER:
             !Ref AdminTokenParameterName
+
+          USER_ID_PARAMETER:
+            !Ref UserIdParameterName
+
+          ADMIN_ID_PARAMETER:
+            !Ref AdminIdParameterName
 
 
       # ---------------------------------------------------

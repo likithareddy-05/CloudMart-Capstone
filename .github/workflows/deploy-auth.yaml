@@ -379,6 +379,8 @@ jobs:
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
               ParameterKey=UserTokenParameterName,ParameterValue="/cloudmart/${ENVIRONMENT}/auth/user-token" \
               ParameterKey=AdminTokenParameterName,ParameterValue="/cloudmart/${ENVIRONMENT}/auth/admin-token" \
+              ParameterKey=UserIdParameterName,ParameterValue="/cloudmart/${ENVIRONMENT}/auth/user-id" \
+              ParameterKey=AdminIdParameterName,ParameterValue="/cloudmart/${ENVIRONMENT}/auth/admin-id" \
               ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"
@@ -429,6 +431,8 @@ jobs:
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
               ParameterKey=UserTokenParameterName,ParameterValue="/cloudmart/${ENVIRONMENT}/auth/user-token" \
               ParameterKey=AdminTokenParameterName,ParameterValue="/cloudmart/${ENVIRONMENT}/auth/admin-token" \
+              ParameterKey=UserIdParameterName,ParameterValue="/cloudmart/${ENVIRONMENT}/auth/user-id" \
+              ParameterKey=AdminIdParameterName,ParameterValue="/cloudmart/${ENVIRONMENT}/auth/admin-id" \
               ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"

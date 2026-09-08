@@ -214,9 +214,42 @@ jobs:
 
           echo "DB password SecureString created/updated."
 
+      # =====================================================
+      # 10. CREATE USER ID PARAMETER
+      # =====================================================
+
+      - name: Create User ID parameter
+        run: |
+
+          aws ssm put-parameter \
+            --name "/cloudmart/$ENVIRONMENT/auth/user-id" \
+            --type "String" \
+            --value "1" \
+            --overwrite \
+            --region "$AWS_REGION"
+
+          echo "USER ID parameter created/updated."
+
 
       # =====================================================
-      # 10. VERIFY PARAMETERS
+      # 11. CREATE ADMIN ID PARAMETER
+      # =====================================================
+
+      - name: Create Admin ID parameter
+        run: |
+
+          aws ssm put-parameter \
+            --name "/cloudmart/$ENVIRONMENT/auth/admin-id" \
+            --type "String" \
+            --value "2" \
+            --overwrite \
+            --region "$AWS_REGION"
+
+          echo "ADMIN ID parameter created/updated."
+
+
+      # =====================================================
+      # 12. VERIFY SSM PARAMETERS
       # =====================================================
       #
       # Only parameter names/types are displayed.
@@ -227,12 +260,24 @@ jobs:
         run: |
 
           echo "=========================================="
-          echo "SSM PARAMETERS"
+          echo "DATABASE SSM PARAMETERS"
           echo "=========================================="
 
           aws ssm describe-parameters \
             --parameter-filters \
               "Key=Name,Option=BeginsWith,Values=/cloudmart/$ENVIRONMENT/db/" \
+            --region "$AWS_REGION" \
+            --query "Parameters[].{Name:Name,Type:Type}" \
+            --output table
+
+
+          echo "=========================================="
+          echo "AUTH SSM PARAMETERS"
+          echo "=========================================="
+
+          aws ssm describe-parameters \
+            --parameter-filters \
+              "Key=Name,Option=BeginsWith,Values=/cloudmart/$ENVIRONMENT/auth/" \
             --region "$AWS_REGION" \
             --query "Parameters[].{Name:Name,Type:Type}" \
             --output table

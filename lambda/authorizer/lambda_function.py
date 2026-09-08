@@ -19,12 +19,16 @@ USER_TOKEN_PARAMETER = os.environ["USER_TOKEN_PARAMETER"]
 
 ADMIN_TOKEN_PARAMETER = os.environ["ADMIN_TOKEN_PARAMETER"]
 
+USER_ID_PARAMETER = os.environ["USER_ID_PARAMETER"]
+
+ADMIN_ID_PARAMETER = os.environ["ADMIN_ID_PARAMETER"]
+
 
 # =========================================================
 # GET TOKEN FROM SSM
 # =========================================================
 
-def get_token(parameter_name):
+def get_parameter(parameter_name):
 
     response = ssm.get_parameter(
         Name=parameter_name,
@@ -32,7 +36,6 @@ def get_token(parameter_name):
     )
 
     return response["Parameter"]["Value"]
-
 
 # =========================================================
 # CREATE IAM POLICY
@@ -222,7 +225,7 @@ def lambda_handler(event, context):
         # USER TOKEN
         # =================================================
 
-        user_token = get_token(
+        user_token = get_parameter(
             USER_TOKEN_PARAMETER
         )
 
@@ -251,7 +254,7 @@ def lambda_handler(event, context):
             # ADMIN TOKEN
             # =============================================
 
-            admin_token = get_token(
+            admin_token = get_parameter(
                 ADMIN_TOKEN_PARAMETER
             )
 
@@ -315,13 +318,15 @@ def lambda_handler(event, context):
             # -------------------------------------------------
             # SAMPLE USER
             #
-            # database/schema.sql creates the first USER
-            # with user_id = 1.
+            # User ID is retrieved from SSM Parameter Store.
+            # This keeps the Authorizer independent of a specific database user.
             #
             # The Order Lambda uses this value as customer_id.
             # -------------------------------------------------
 
-            user_id = 1
+            user_id = int(
+                get_parameter(USER_ID_PARAMETER)
+            )
 
 
             print(json.dumps({
@@ -364,6 +369,10 @@ def lambda_handler(event, context):
                 + "/*/*"
             )
 
+            admin_user_id = int(
+                get_parameter(ADMIN_ID_PARAMETER)
+            )
+
 
             print(json.dumps({
                 "event": "authorization_success",
@@ -381,7 +390,8 @@ def lambda_handler(event, context):
                 "cloudmart-admin",
                 "Allow",
                 [admin_resource],
-                "ADMIN"
+                "ADMIN",
+                user_id=admin_user_id
             )
 
 
