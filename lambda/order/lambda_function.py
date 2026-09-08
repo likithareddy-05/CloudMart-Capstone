@@ -1,27 +1,27 @@
-import json
-import os
+import json #Reads JSON request bodies
+import os #Reads environment variables.
 
-import boto3
-import pymysql
+import boto3 #Used here for:SSM Parameter Store,EventBridge
+import pymysql #Connects Python Lambda to your RDS MySQL database.
 
 
 # =========================================================
 # AWS CLIENT
 # =========================================================
 
-ssm = boto3.client("ssm")
-events_client = boto3.client("events")
-
+ssm = boto3.client("ssm") #used to retrieve parameters
+events_client = boto3.client("events") #Used to publish events
+#database credentials are not hardcoded in Lambda code.
 
 # =========================================================
 # ENVIRONMENT VARIABLES
 # =========================================================
-
+#This makes the Lambda environment-aware
 ENVIRONMENT = os.environ.get(
     "ENVIRONMENT",
     "dev"
 )
-
+#contains the EventBridge bus name
 EVENT_BUS_NAME = os.environ.get(
     "EVENT_BUS_NAME"
 )
@@ -39,7 +39,7 @@ def get_parameter(name):
     )
 
     return response["Parameter"]["Value"]
-
+#Go to SSM Parameter Store, get this parameter, decrypt it if necessary, and return its value
 
 # =========================================================
 # GET DATABASE CREDENTIALS
@@ -92,7 +92,7 @@ def get_connection():
         read_timeout=30,
         write_timeout=30,
         cursorclass=pymysql.cursors.DictCursor,
-        autocommit=False
+        autocommit=False #database changes are not automatically committed one-by-one
     )
 
 
@@ -112,14 +112,14 @@ def response(status_code, body):
             default=str
         )
     }
-
+#This produces an API Gateway-compatible response
 
 # =========================================================
 # GET AUTHENTICATED USER
 # =========================================================
 
 def get_authorizer_context(event):
-
+#Lambda looks inside event->request context->authorizer->roke&user_id
     request_context = event.get(
         "requestContext",
         {}
@@ -153,13 +153,13 @@ def get_authorizer_context(event):
 # =========================================================
 # PUBLISH EVENT TO EVENTBRIDGE
 # =========================================================
-
+#creates an EventBridge event
 def publish_event(
     detail_type,
     detail,
     source="cloudmart.order"
 ):
-
+#order lambda->event bridge->cloudmarteventbus->rules->target services
     if not EVENT_BUS_NAME:
 
         print(json.dumps({
@@ -225,7 +225,7 @@ def validate_customer(
         """,
         (customer_id,)
     )
-
+#checks that the authenticated user actually exists in your users table
     customer = cursor.fetchone()
 
     if not customer:
@@ -363,14 +363,14 @@ def create_order(
         # =================================================
         # CONNECT TO RDS
         # =================================================
-
+#Lambda connects to your private RDS MySQL
         connection = get_connection()
 
         print(json.dumps({
             "event": "rds_connection",
             "status": "success"
         }))
-
+#Lambda is in the VPC/private subnet, and the RDS security group allows MySQL traffic from the Lambda security group
 
         # =================================================
         # START TRANSACTION
@@ -420,7 +420,7 @@ def create_order(
             # FOR UPDATE locks the inventory row while
             # this transaction is running.
             # =============================================
-
+# stock=1,Two customers place an order at almost exactly the same time.
             cursor.execute(
                 """
                 SELECT
@@ -434,7 +434,8 @@ def create_order(
                 """,
                 (product_id,)
             )
-
+#To prevent concurrent orders from reading the same stock value and overselling the product.
+#  It locks the inventory row until the transaction completes.
             inventory = cursor.fetchone()
 
             if not inventory:
@@ -442,12 +443,11 @@ def create_order(
                 raise ValueError(
                     "Inventory not found for product"
                 )
-
-
+#without locking-Both requests might think the item is available.
+#with FOR UPDATE:the database locks that inventory row for the current transaction
             # =============================================
             # CHECK STOCK
             # =============================================
-
             if inventory["stock_count"] < quantity:
 
                 failure_reason = (
@@ -502,7 +502,7 @@ def create_order(
                 # =============================================
                 # COMMIT FAILED ORDER
                 # =============================================
-
+#So the failed order is saved permanently
                 connection.commit()
 
                 print(json.dumps({
@@ -517,7 +517,7 @@ def create_order(
                 # =============================================
                 # ORDER FAILED EVENT
                 # =============================================
-
+#Then you publish order failed event to eventbridge
                 try:
 
                     publish_event(
@@ -638,7 +638,7 @@ def create_order(
 
 
             # =============================================
-            # UPDATE ORDER TO CONFIRMED
+            # UPDATE ORDER PENDING TO CONFIRMED
             # =============================================
 
             cursor.execute(
@@ -769,11 +769,11 @@ def create_order(
             }
         )
 
-
+#Validation error like customer/product/inventory not found
     except ValueError as error:
 
         if connection:
-
+#if a DB connection exists
             connection.rollback()
 
         print(json.dumps({
@@ -783,8 +783,8 @@ def create_order(
             "product_id": product_id,
             "quantity": quantity
         }))
-
-
+#rollback-Because the order operation involves multiple database changes. If an error occurs before commit,
+#it prevents partial changes from being persisted.
         # ===============================================
         # PUBLISH ORDER FAILED EVENT
         # ===============================================
@@ -1232,7 +1232,7 @@ def get_orders(
 # =========================================================
 # LAMBDA HANDLER
 # =========================================================
-
+#the traffic controller-this is the entry point of the Lambda
 def lambda_handler(
     event,
     context

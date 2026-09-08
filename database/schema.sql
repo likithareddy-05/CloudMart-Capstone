@@ -1,3 +1,7 @@
+-- =====================================================
+-- CLOUDMART DATABASE SCHEMA
+-- =====================================================
+
 CREATE DATABASE IF NOT EXISTS cloudmart;
 
 USE cloudmart;
@@ -9,10 +13,15 @@ USE cloudmart;
 
 CREATE TABLE IF NOT EXISTS users (
     user_id INT AUTO_INCREMENT PRIMARY KEY,
+
     name VARCHAR(150) NOT NULL,
+
     email VARCHAR(255) NOT NULL UNIQUE,
+
     role VARCHAR(20) NOT NULL DEFAULT 'USER',
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP
 );
@@ -24,11 +33,19 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS products (
     product_id INT AUTO_INCREMENT PRIMARY KEY,
+
     name VARCHAR(150) NOT NULL,
+
     description VARCHAR(500),
+
     price DECIMAL(10,2) NOT NULL,
+
     category VARCHAR(100),
+
+    is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP
 );
@@ -40,9 +57,13 @@ CREATE TABLE IF NOT EXISTS products (
 
 CREATE TABLE IF NOT EXISTS inventory (
     inventory_id INT AUTO_INCREMENT PRIMARY KEY,
+
     product_id INT NOT NULL,
+
     stock_count INT NOT NULL DEFAULT 0,
+
     low_stock_threshold INT NOT NULL DEFAULT 10,
+
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         ON UPDATE CURRENT_TIMESTAMP,
 
@@ -56,6 +77,9 @@ CREATE TABLE IF NOT EXISTS inventory (
 
 -- =====================================================
 -- ORDERS TABLE
+--
+-- One order can contain multiple products.
+-- Product-specific information is stored in order_items.
 -- =====================================================
 
 CREATE TABLE IF NOT EXISTS orders (
@@ -63,13 +87,11 @@ CREATE TABLE IF NOT EXISTS orders (
 
     customer_id INT NOT NULL,
 
-    product_id INT NOT NULL,
-
-    quantity INT NOT NULL,
-
-    total_amount DECIMAL(10,2) NOT NULL,
+    total_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
 
     status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+
+    failure_reason VARCHAR(500) NULL,
 
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
@@ -80,13 +102,52 @@ CREATE TABLE IF NOT EXISTS orders (
         FOREIGN KEY (customer_id)
         REFERENCES users(user_id)
         ON DELETE RESTRICT
+        ON UPDATE CASCADE
+);
+
+
+-- =====================================================
+-- ORDER ITEMS TABLE
+--
+-- Stores individual products belonging to an order.
+--
+-- Example:
+--
+-- Order 1001:
+--     Product 17 -> quantity 2
+--     Product 5  -> quantity 1
+--     Product 12 -> quantity 3
+--
+-- This creates ONE order row and THREE order_items rows.
+-- =====================================================
+
+CREATE TABLE IF NOT EXISTS order_items (
+    order_item_id INT AUTO_INCREMENT PRIMARY KEY,
+
+    order_id INT NOT NULL,
+
+    product_id INT NOT NULL,
+
+    quantity INT NOT NULL,
+
+    unit_price DECIMAL(10,2) NOT NULL,
+
+    subtotal DECIMAL(10,2) NOT NULL,
+
+    CONSTRAINT fk_order_items_order
+        FOREIGN KEY (order_id)
+        REFERENCES orders(order_id)
+        ON DELETE CASCADE
         ON UPDATE CASCADE,
 
-    CONSTRAINT fk_orders_product
+    CONSTRAINT fk_order_items_product
         FOREIGN KEY (product_id)
         REFERENCES products(product_id)
         ON DELETE RESTRICT
-        ON UPDATE CASCADE
+        ON UPDATE CASCADE,
+
+    CONSTRAINT uq_order_product
+        UNIQUE (order_id, product_id)
 );
 
 
@@ -160,7 +221,183 @@ DEALLOCATE PREPARE stmt;
 
 
 -- =====================================================
--- ORDERS PRODUCT INDEX
+-- ORDER ITEMS ORDER INDEX
+-- =====================================================
+
+SET @index_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'order_items'
+      AND index_name = 'idx_order_items_order'
+);
+
+SET @sql = IF(
+    @index_exists = 0,
+    'CREATE INDEX idx_order_items_order ON order_items(order_id)',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- ORDER ITEMS PRODUCT INDEX
+-- =====================================================
+
+SET @index_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.statistics
+    WHERE table_schema = DATABASE()
+      AND table_name = 'order_items'
+      AND index_name = 'idx_order_items_product'
+);
+
+SET @sql = IF(
+    @index_exists = 0,
+    'CREATE INDEX idx_order_items_product ON order_items(product_id)',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- ADD FAILURE_REASON TO EXISTING ORDERS
+-- =====================================================
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'orders'
+      AND column_name = 'failure_reason'
+);
+
+SET @sql = IF(
+    @column_exists = 0,
+    'ALTER TABLE orders
+     ADD COLUMN failure_reason VARCHAR(500) NULL',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- ADD IS_DELETED TO EXISTING PRODUCTS
+-- =====================================================
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'products'
+      AND column_name = 'is_deleted'
+);
+
+SET @sql = IF(
+    @column_exists = 0,
+    'ALTER TABLE products
+     ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- MIGRATE EXISTING ORDERS
+--
+-- Old orders table had:
+--     product_id
+--     quantity
+--
+-- These values are moved into order_items.
+-- =====================================================
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'orders'
+      AND column_name = 'product_id'
+);
+
+SET @sql = IF(
+    @column_exists = 1,
+    '
+    INSERT INTO order_items
+        (
+            order_id,
+            product_id,
+            quantity,
+            unit_price,
+            subtotal
+        )
+    SELECT
+        o.order_id,
+        o.product_id,
+        o.quantity,
+
+        CASE
+            WHEN o.quantity > 0
+                THEN o.total_amount / o.quantity
+            ELSE 0
+        END,
+
+        o.total_amount
+
+    FROM orders o
+
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM order_items oi
+        WHERE oi.order_id = o.order_id
+    )
+    ',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- DROP OLD ORDERS PRODUCT FOREIGN KEY
+-- =====================================================
+
+SET @constraint_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.table_constraints
+    WHERE constraint_schema = DATABASE()
+      AND table_name = 'orders'
+      AND constraint_name = 'fk_orders_product'
+);
+
+SET @sql = IF(
+    @constraint_exists = 1,
+    'ALTER TABLE orders
+     DROP FOREIGN KEY fk_orders_product',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- DROP OLD ORDERS PRODUCT INDEX
 -- =====================================================
 
 SET @index_exists = (
@@ -172,8 +409,57 @@ SET @index_exists = (
 );
 
 SET @sql = IF(
-    @index_exists = 0,
-    'CREATE INDEX idx_orders_product ON orders(product_id)',
+    @index_exists = 1,
+    'ALTER TABLE orders
+     DROP INDEX idx_orders_product',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- DROP OLD ORDERS PRODUCT_ID COLUMN
+-- =====================================================
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'orders'
+      AND column_name = 'product_id'
+);
+
+SET @sql = IF(
+    @column_exists = 1,
+    'ALTER TABLE orders
+     DROP COLUMN product_id',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- DROP OLD ORDERS QUANTITY COLUMN
+-- =====================================================
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'orders'
+      AND column_name = 'quantity'
+);
+
+SET @sql = IF(
+    @column_exists = 1,
+    'ALTER TABLE orders
+     DROP COLUMN quantity',
     'SELECT 1'
 );
 
@@ -187,29 +473,29 @@ DEALLOCATE PREPARE stmt;
 -- =====================================================
 
 INSERT INTO users
-    (name, email, role)
-SELECT
-    'CloudMart User',
-    'user@cloudmart.com',
-    'USER'
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM users
-    WHERE email = 'user@cloudmart.com'
-);
-
-
-INSERT INTO users
-    (name, email, role)
-SELECT
-    'CloudMart Admin',
-    'admin@cloudmart.com',
-    'ADMIN'
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM users
-    WHERE email = 'admin@cloudmart.com'
-);
+    (
+        user_id,
+        name,
+        email,
+        role
+    )
+VALUES
+    (
+        1,
+        'CloudMart User',
+        'user@cloudmart.com',
+        'USER'
+    ),
+    (
+        2,
+        'CloudMart Admin',
+        'admin@cloudmart.com',
+        'ADMIN'
+    )
+ON DUPLICATE KEY UPDATE
+    name = VALUES(name),
+    email = VALUES(email),
+    role = VALUES(role);
 
 
 -- =====================================================
@@ -217,45 +503,40 @@ WHERE NOT EXISTS (
 -- =====================================================
 
 INSERT INTO products
-    (name, description, price, category)
-SELECT
-    'Laptop',
-    '15 inch business laptop',
-    65000.00,
-    'Electronics'
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM products
-    WHERE name = 'Laptop'
-);
-
-
-INSERT INTO products
-    (name, description, price, category)
-SELECT
-    'Wireless Mouse',
-    'Wireless optical mouse',
-    1200.00,
-    'Accessories'
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM products
-    WHERE name = 'Wireless Mouse'
-);
-
-
-INSERT INTO products
-    (name, description, price, category)
-SELECT
-    'Keyboard',
-    'Mechanical keyboard',
-    3500.00,
-    'Accessories'
-WHERE NOT EXISTS (
-    SELECT 1
-    FROM products
-    WHERE name = 'Keyboard'
-);
+    (
+        product_id,
+        name,
+        description,
+        price,
+        category
+    )
+VALUES
+    (
+        1,
+        'Laptop',
+        'Business laptop',
+        75000.00,
+        'Electronics'
+    ),
+    (
+        2,
+        'Wireless Mouse',
+        'Wireless optical mouse',
+        1200.00,
+        'Accessories'
+    ),
+    (
+        3,
+        'Keyboard',
+        'Mechanical keyboard',
+        3500.00,
+        'Accessories'
+    )
+ON DUPLICATE KEY UPDATE
+    name = VALUES(name),
+    description = VALUES(description),
+    price = VALUES(price),
+    category = VALUES(category);
 
 
 -- =====================================================
@@ -263,95 +544,32 @@ WHERE NOT EXISTS (
 -- =====================================================
 
 INSERT INTO inventory
-    (product_id, stock_count, low_stock_threshold)
-SELECT
-    product_id,
-    25,
-    5
-FROM products
-WHERE name = 'Laptop'
-  AND NOT EXISTS (
-      SELECT 1
-      FROM inventory i
-      WHERE i.product_id = products.product_id
-  );
-
-
-INSERT INTO inventory
-    (product_id, stock_count, low_stock_threshold)
-SELECT
-    product_id,
-    50,
-    10
-FROM products
-WHERE name = 'Wireless Mouse'
-  AND NOT EXISTS (
-      SELECT 1
-      FROM inventory i
-      WHERE i.product_id = products.product_id
-  );
-
-
-INSERT INTO inventory
-    (product_id, stock_count, low_stock_threshold)
-SELECT
-    product_id,
-    8,
-    10
-FROM products
-WHERE name = 'Keyboard'
-  AND NOT EXISTS (
-      SELECT 1
-      FROM inventory i
-      WHERE i.product_id = products.product_id
-  );
-
-
-
-
+    (
+        product_id,
+        stock_count,
+        low_stock_threshold
+    )
+VALUES
+    (
+        1,
+        50,
+        10
+    ),
+    (
+        2,
+        100,
+        20
+    ),
+    (
+        3,
+        75,
+        15
+    )
+ON DUPLICATE KEY UPDATE
+    stock_count = VALUES(stock_count),
+    low_stock_threshold = VALUES(low_stock_threshold);
 
 
 -- =====================================================
--- ORDERS FAILURE REASON COLUMN
+-- END OF SCHEMA
 -- =====================================================
-
-SET @column_exists = (
-    SELECT COUNT(*)
-    FROM information_schema.columns
-    WHERE table_schema = DATABASE()
-      AND table_name = 'orders'
-      AND column_name = 'failure_reason'
-);
-
-SET @sql = IF(
-    @column_exists = 0,
-    'ALTER TABLE orders ADD COLUMN failure_reason VARCHAR(500) NULL AFTER status',
-    'SELECT 1'
-);
-
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
-
-
--- =====================================================
--- PRODUCTS SOFT DELETE COLUMN
--- =====================================================
-
-SET @column_exists = (
-    SELECT COUNT(*)
-    FROM information_schema.columns
-    WHERE table_schema = DATABASE()
-      AND table_name = 'products'
-      AND column_name = 'is_deleted'
-);
-
-SET @sql = IF(
-    @column_exists = 0,
-    'ALTER TABLE products ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE',
-    'SELECT 1'
-);
-
-PREPARE stmt FROM @sql;
-EXECUTE stmt;
-DEALLOCATE PREPARE stmt;
