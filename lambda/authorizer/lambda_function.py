@@ -7,7 +7,7 @@ import hmac #Secure token comparison
 # =========================================================
 # AWS CLIENT
 # =========================================================
-
+#Get RDS credentials
 ssm = boto3.client("ssm")
 
 
@@ -22,12 +22,12 @@ ADMIN_TOKEN_PARAMETER = os.environ["ADMIN_TOKEN_PARAMETER"]
 USER_ID_PARAMETER = os.environ["USER_ID_PARAMETER"]
 
 ADMIN_ID_PARAMETER = os.environ["ADMIN_ID_PARAMETER"]
-
+#It gets the parameter name from its environment variables
 
 # =========================================================
 # GET TOKEN FROM SSM
 # =========================================================
-
+#retrieves the actual value from SSM.
 def get_parameter(parameter_name):
 
     response = ssm.get_parameter(

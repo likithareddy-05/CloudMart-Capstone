@@ -191,7 +191,8 @@ def get_authorizer_context(event):
 def publish_event(
     detail_type,
     detail,
-    source="cloudmart.order"
+    # source="cloudmart.order"
+    source="clart.order"
 ):
     """
     Publish an event to the CloudMart EventBridge bus.
