@@ -364,7 +364,7 @@ def create_order(
         # VALIDATE ALL ITEMS
         # =================================================
 
-        product_ids = set()
+        combined_items = {}
 
         for item in items:
 
@@ -381,7 +381,6 @@ def create_order(
                     }
                 )
 
-
             product_id = item.get(
                 "productId"
             )
@@ -389,7 +388,6 @@ def create_order(
             quantity = item.get(
                 "quantity"
             )
-
 
             # ---------------------------------------------
             # PRODUCT ID REQUIRED
@@ -405,7 +403,6 @@ def create_order(
                     }
                 )
 
-
             # ---------------------------------------------
             # QUANTITY REQUIRED
             # ---------------------------------------------
@@ -419,7 +416,6 @@ def create_order(
                             "quantity is required for every item"
                     }
                 )
-
 
             # ---------------------------------------------
             # CONVERT PRODUCT ID
@@ -444,7 +440,6 @@ def create_order(
                     }
                 )
 
-
             # ---------------------------------------------
             # CONVERT QUANTITY
             # ---------------------------------------------
@@ -468,7 +463,6 @@ def create_order(
                     }
                 )
 
-
             # ---------------------------------------------
             # VALIDATE PRODUCT ID
             # ---------------------------------------------
@@ -482,7 +476,6 @@ def create_order(
                             "productId must be greater than 0"
                     }
                 )
-
 
             # ---------------------------------------------
             # VALIDATE QUANTITY
@@ -498,33 +491,31 @@ def create_order(
                     }
                 )
 
-
             # ---------------------------------------------
-            # DUPLICATE PRODUCT CHECK
+            # COMBINE DUPLICATE PRODUCT IDs
             # ---------------------------------------------
 
-            if product_id in product_ids:
+            if product_id in combined_items:
 
-                return response(
-                    400,
-                    {
-                        "message":
-                            f"Product {product_id} "
-                            "appears more than once in the order"
-                    }
-                )
+                combined_items[product_id] += quantity
 
-            product_ids.add(
-                product_id
-            )
+            else:
+
+                combined_items[product_id] = quantity
 
 
-            validated_items.append(
-                {
-                    "product_id": product_id,
-                    "quantity": quantity
-                }
-            )
+        # =================================================
+        # CREATE FINAL VALIDATED ITEM LIST
+        # =================================================
+
+        validated_items = [
+            {
+                "product_id": product_id,
+                "quantity": quantity
+            }
+            for product_id, quantity
+            in combined_items.items()
+        ]
 
 
         # =================================================
@@ -1772,7 +1763,7 @@ def cancel_order(
                     {
                         "product_id":
                             item["product_id"],
-                        "quantity":
+                        "stock_count":
                             item["new_stock"],
                         "change":
                             item["quantity_restored"],

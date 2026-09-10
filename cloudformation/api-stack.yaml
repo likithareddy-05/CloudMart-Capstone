@@ -464,6 +464,32 @@ Resources:
           Arn:
             !Ref OrderTopic
 
+          InputTransformer:
+
+            InputPathsMap:
+
+              orderId:
+                $.detail.order_id
+
+              customerEmail:
+                $.detail.customer_email
+
+              totalAmount:
+                $.detail.total_amount
+
+              status:
+                $.detail.status
+
+            InputTemplate: |
+              CloudMart Order Notification
+
+              Order ID: <orderId>
+              Customer Email: <customerEmail>
+              Status: <status>
+              Total Amount: <totalAmount>
+
+              Your order has been confirmed successfully.
+
 
   # =======================================================
   # EVENTBRIDGE → ORDER FAILED → SNS
@@ -501,6 +527,106 @@ Resources:
 
           Arn:
             !Ref OrderTopic
+
+          InputTransformer:
+
+            InputPathsMap:
+
+              orderId:
+                $.detail.order_id
+
+              customerId:
+                $.detail.customer_id
+
+              totalAmount:
+                $.detail.total_amount
+
+              status:
+                $.detail.status
+
+              reason:
+                $.detail.reason
+
+            InputTemplate: |
+              CloudMart Order Notification
+
+              Order ID: <orderId>
+              Customer ID: <customerId>
+              Status: <status>
+              Total Amount: <totalAmount>
+
+              Order could not be processed.
+
+              Reason: <reason>
+
+  # =======================================================
+  # EVENTBRIDGE → ORDER CANCELLED → SNS
+  # =======================================================
+
+  OrderCancelledRule:
+
+    Type: AWS::Events::Rule
+
+    Properties:
+
+      Name:
+        !Sub CloudMart-${Environment}-OrderCancelledRule
+
+      EventBusName:
+        !Ref CloudMartEventBus
+
+      State:
+        ENABLED
+
+      EventPattern:
+
+        source:
+
+          - cloudmart.order
+
+        detail-type:
+
+          - OrderCancelled
+
+      Targets:
+
+        - Id:
+            OrderCancelledSNSTarget
+
+          Arn:
+            !Ref OrderTopic
+
+          InputTransformer:
+
+            InputPathsMap:
+
+              orderId:
+                $.detail.order_id
+
+              customerId:
+                $.detail.customer_id
+
+              totalAmount:
+                $.detail.total_amount
+
+              previousStatus:
+                $.detail.previous_status
+
+              status:
+                $.detail.status
+
+            InputTemplate: |
+              CloudMart Order Notification
+
+              Order ID: <orderId>
+              Customer ID: <customerId>
+              Previous Status: <previousStatus>
+              Status: <status>
+              Total Amount: <totalAmount>
+
+              Your order has been cancelled successfully.
+
+              The inventory has been restored.
 
 
   # =======================================================
@@ -550,6 +676,8 @@ Resources:
                   - !GetAtt OrderConfirmedRule.Arn
 
                   - !GetAtt OrderFailedRule.Arn
+
+                  - !GetAtt OrderCancelledRule.Arn
 
 
   # =======================================================
