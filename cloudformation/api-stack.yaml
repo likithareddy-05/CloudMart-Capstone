@@ -481,14 +481,7 @@ Resources:
                 $.detail.status
 
             InputTemplate: |
-              CloudMart Order Notification
-
-              Order ID: <orderId>
-              Customer Email: <customerEmail>
-              Status: <status>
-              Total Amount: <totalAmount>
-
-              Your order has been confirmed successfully.
+              "CloudMart Order Notification\n\nOrder ID: <orderId>\nCustomer Email: <customerEmail>\nStatus: <status>\nTotal Amount: <totalAmount>\n\nYour order has been confirmed successfully."
 
 
   # =======================================================
@@ -548,16 +541,7 @@ Resources:
                 $.detail.reason
 
             InputTemplate: |
-              CloudMart Order Notification
-
-              Order ID: <orderId>
-              Customer ID: <customerId>
-              Status: <status>
-              Total Amount: <totalAmount>
-
-              Order could not be processed.
-
-              Reason: <reason>
+              "CloudMart Order Notification\n\nOrder ID: <orderId>\nCustomer ID: <customerId>\nStatus: <status>\nTotal Amount: <totalAmount>\n\nOrder could not be processed.\n\nReason: <reason>"
 
   # =======================================================
   # EVENTBRIDGE → ORDER CANCELLED → SNS
@@ -616,17 +600,7 @@ Resources:
                 $.detail.status
 
             InputTemplate: |
-              CloudMart Order Notification
-
-              Order ID: <orderId>
-              Customer ID: <customerId>
-              Previous Status: <previousStatus>
-              Status: <status>
-              Total Amount: <totalAmount>
-
-              Your order has been cancelled successfully.
-
-              The inventory has been restored.
+              "CloudMart Order Notification\n\nOrder ID: <orderId>\nCustomer ID: <customerId>\nPrevious Status: <previousStatus>\nStatus: <status>\nTotal Amount: <totalAmount>\n\nYour order has been cancelled successfully.\n\nThe inventory has been restored."
 
 
   # =======================================================
