@@ -1093,10 +1093,9 @@ Resources:
         apigateway.amazonaws.com
 
 
-  # =======================================================
+    # =======================================================
   # API DEPLOYMENT
   # =======================================================
-
 
   ApiDeployment:
 
@@ -1120,28 +1119,11 @@ Resources:
       RestApiId:
         !Ref ApiGateway
 
-
-  # =======================================================
-  # API STAGE
-  # =======================================================
-
-  ApiStage:
-
-    Type: AWS::ApiGateway::Stage
-
-    DependsOn:
-      - ApiDeployment
-
-    Properties:
-
-      RestApiId:
-        !Ref ApiGateway
-
       StageName:
         !Ref Environment
 
-      DeploymentId:
-        !Ref ApiDeployment
+
+
 
 # =========================================================
 # OUTPUTS
