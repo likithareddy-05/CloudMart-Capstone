@@ -680,8 +680,8 @@ Resources:
               Fn::ImportValue:
                 !Sub CloudMart-${Environment}-AuthorizerLambdaArn
 
-      AuthorizerResultTtlInSeconds:
-        300
+      AuthorizerResultTtlInSeconds:0
+        
 
 
   # =======================================================
