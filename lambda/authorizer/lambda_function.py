@@ -294,6 +294,7 @@ def lambda_handler(event, context):
         #
         # GET  /*
         # POST /orders
+        # PATCH /orders/{id}
         #
         # USER CANNOT:
         #
@@ -310,24 +311,23 @@ def lambda_handler(event, context):
                 api_arn_base + "/GET/*",
 
                 # USER can create orders
-                api_arn_base + "/POST/orders"
+                api_arn_base + "/POST/orders",
+
+                # USER can request cancellation
+                # Order Lambda checks order ownership
+                api_arn_base + "/PATCH/orders/*"
 
             ]
-
 
             # -------------------------------------------------
             # SAMPLE USER
             #
             # User ID is retrieved from SSM Parameter Store.
-            # This keeps the Authorizer independent of a specific database user.
-            #
-            # The Order Lambda uses this value as customer_id.
             # -------------------------------------------------
 
             user_id = int(
                 get_parameter(USER_ID_PARAMETER)
             )
-
 
             print(json.dumps({
                 "event": "authorization_success",
@@ -335,10 +335,10 @@ def lambda_handler(event, context):
                 "user_id": user_id,
                 "allowed_methods": [
                     "GET",
-                    "POST /orders"
+                    "POST /orders",
+                    "PATCH /orders/{id}"
                 ]
             }))
-
 
             return create_policy(
                 "cloudmart-user",
@@ -347,7 +347,6 @@ def lambda_handler(event, context):
                 "USER",
                 user_id=user_id
             )
-
 
         # =================================================
         # ADMIN POLICY
