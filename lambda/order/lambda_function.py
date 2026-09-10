@@ -1419,6 +1419,432 @@ def create_order(
 
             connection.close()
 
+# =========================================================
+# CANCEL ORDER
+# PATCH /orders/{id}
+# =========================================================
+def cancel_order(
+    event,
+    authenticated_user
+):
+    connection = None
+
+    try:
+
+        # =================================================
+        # GET ORDER ID
+        # =================================================
+        path_parameters = (
+            event.get("pathParameters")
+            or {}
+        )
+
+        order_id = path_parameters.get("id")
+
+        if not order_id:
+            return response(
+                400,
+                {
+                    "message": "Order ID is required"
+                }
+            )
+
+        try:
+            order_id = int(order_id)
+
+        except (
+            TypeError,
+            ValueError
+        ):
+            return response(
+                400,
+                {
+                    "message": "Order ID must be an integer"
+                }
+            )
+
+        # =================================================
+        # GET REQUEST BODY
+        # =================================================
+        body = event.get("body")
+
+        if not body:
+            return response(
+                400,
+                {
+                    "message": "Request body is required"
+                }
+            )
+
+        try:
+            body = json.loads(body)
+
+        except json.JSONDecodeError:
+            return response(
+                400,
+                {
+                    "message": "Request body must be valid JSON"
+                }
+            )
+
+        requested_status = body.get("status")
+
+        if requested_status != "CANCELLED":
+            return response(
+                400,
+                {
+                    "message":
+                        "Only status CANCELLED is supported"
+                }
+            )
+
+        # =================================================
+        # CONNECT TO RDS
+        # =================================================
+        connection = get_connection()
+
+        print(json.dumps({
+            "event": "cancel_order_rds_connection",
+            "status": "success",
+            "order_id": order_id
+        }))
+
+        # =================================================
+        # START TRANSACTION
+        # =================================================
+        with connection.cursor() as cursor:
+
+            # =============================================
+            # GET ORDER AND LOCK IT
+            # =============================================
+            cursor.execute(
+                """
+                SELECT
+                    order_id,
+                    customer_id,
+                    total_amount,
+                    status
+                FROM orders
+                WHERE order_id = %s
+                FOR UPDATE
+                """,
+                (order_id,)
+            )
+
+            order = cursor.fetchone()
+
+            # =============================================
+            # ORDER NOT FOUND
+            # =============================================
+            if not order:
+                connection.rollback()
+
+                return response(
+                    404,
+                    {
+                        "message": "Order not found"
+                    }
+                )
+
+            # =============================================
+            # USER CAN ONLY CANCEL OWN ORDER
+            # ADMIN CAN CANCEL ANY ORDER
+            # =============================================
+            if (
+                authenticated_user["role"] != "ADMIN"
+                and order["customer_id"]
+                    != authenticated_user["user_id"]
+            ):
+                connection.rollback()
+
+                return response(
+                    403,
+                    {
+                        "message":
+                            "You are not allowed to cancel this order"
+                    }
+                )
+
+            # =============================================
+            # CHECK CURRENT STATUS
+            # =============================================
+            current_status = order["status"]
+
+            if current_status == "CANCELLED":
+
+                connection.rollback()
+
+                return response(
+                    409,
+                    {
+                        "message":
+                            "Order is already cancelled",
+                        "order_id": order_id,
+                        "status": current_status
+                    }
+                )
+
+            if current_status not in (
+                "PENDING",
+                "CONFIRMED"
+            ):
+
+                connection.rollback()
+
+                return response(
+                    409,
+                    {
+                        "message":
+                            "Order cannot be cancelled",
+                        "order_id": order_id,
+                        "status": current_status
+                    }
+                )
+
+            # =============================================
+            # GET ORDER ITEMS
+            # =============================================
+            cursor.execute(
+                """
+                SELECT
+                    order_item_id,
+                    product_id,
+                    quantity
+                FROM order_items
+                WHERE order_id = %s
+                ORDER BY product_id
+                """,
+                (order_id,)
+            )
+
+            order_items = cursor.fetchall()
+
+            if not order_items:
+
+                connection.rollback()
+
+                return response(
+                    409,
+                    {
+                        "message":
+                            "Order has no items to restore"
+                    }
+                )
+
+            # =============================================
+            # RESTORE INVENTORY
+            #
+            # FOR UPDATE prevents another transaction
+            # from changing the same inventory row while
+            # cancellation is in progress.
+            # =============================================
+            restored_items = []
+
+            for item in order_items:
+
+                product_id = item["product_id"]
+                quantity = item["quantity"]
+
+                cursor.execute(
+                    """
+                    SELECT
+                        inventory_id,
+                        product_id,
+                        stock_count
+                    FROM inventory
+                    WHERE product_id = %s
+                    FOR UPDATE
+                    """,
+                    (product_id,)
+                )
+
+                inventory = cursor.fetchone()
+
+                if not inventory:
+
+                    raise ValueError(
+                        f"Inventory not found for product {product_id}"
+                    )
+
+                old_stock = inventory["stock_count"]
+
+                new_stock = (
+                    old_stock + quantity
+                )
+
+                cursor.execute(
+                    """
+                    UPDATE inventory
+                    SET stock_count = %s
+                    WHERE product_id = %s
+                    """,
+                    (
+                        new_stock,
+                        product_id
+                    )
+                )
+
+                restored_items.append({
+                    "product_id": product_id,
+                    "quantity_restored": quantity,
+                    "old_stock": old_stock,
+                    "new_stock": new_stock
+                })
+
+            # =============================================
+            # UPDATE ORDER STATUS
+            # =============================================
+            cursor.execute(
+                """
+                UPDATE orders
+                SET status = %s
+                WHERE order_id = %s
+                """,
+                (
+                    "CANCELLED",
+                    order_id
+                )
+            )
+
+            # =============================================
+            # COMMIT TRANSACTION
+            # =============================================
+            connection.commit()
+
+        # =================================================
+        # LOG SUCCESS
+        # =================================================
+        print(json.dumps({
+            "event": "order_cancelled",
+            "order_id": order_id,
+            "customer_id": order["customer_id"],
+            "previous_status": current_status,
+            "status": "CANCELLED",
+            "restored_items": restored_items
+        }))
+
+        # =================================================
+        # PUBLISH ORDER CANCELLED EVENT
+        # =================================================
+        try:
+
+            publish_event(
+                "OrderCancelled",
+                {
+                    "order_id": order_id,
+                    "customer_id": order["customer_id"],
+                    "total_amount": float(
+                        order["total_amount"]
+                    ),
+                    "previous_status": current_status,
+                    "status": "CANCELLED",
+                    "items": [
+                        {
+                            "product_id":
+                                item["product_id"],
+                            "quantity":
+                                item["quantity"]
+                        }
+                        for item in order_items
+                    ]
+                }
+            )
+
+        except Exception as event_error:
+
+            print(json.dumps({
+                "event":
+                    "order_cancelled_event_error",
+                "order_id": order_id,
+                "error":
+                    str(event_error)
+            }))
+
+        # =================================================
+        # PUBLISH INVENTORY UPDATED EVENTS
+        # =================================================
+        for item in restored_items:
+
+            try:
+
+                publish_event(
+                    "InventoryUpdated",
+                    {
+                        "product_id":
+                            item["product_id"],
+                        "quantity":
+                            item["new_stock"],
+                        "change":
+                            item["quantity_restored"],
+                        "reason":
+                            "ORDER_CANCELLED",
+                        "order_id":
+                            order_id
+                    }
+                )
+
+            except Exception as event_error:
+
+                print(json.dumps({
+                    "event":
+                        "inventory_updated_event_error",
+                    "order_id":
+                        order_id,
+                    "product_id":
+                        item["product_id"],
+                    "error":
+                        str(event_error)
+                }))
+
+        # =================================================
+        # RESPONSE
+        # =================================================
+        return response(
+            200,
+            {
+                "message":
+                    "Order cancelled successfully",
+                "order_id":
+                    order_id,
+                "status":
+                    "CANCELLED",
+                "restored_items":
+                    restored_items
+            }
+        )
+
+    except Exception as error:
+
+        # =============================================
+        # ROLLBACK
+        # =============================================
+        if connection:
+            try:
+                connection.rollback()
+            except Exception:
+                pass
+
+        print(json.dumps({
+            "event":
+                "cancel_order_failed",
+            "order_id":
+                locals().get("order_id"),
+            "error":
+                str(error)
+        }))
+
+        return response(
+            500,
+            {
+                "message":
+                    "Internal server error"
+            }
+        )
+
+    finally:
+
+        if connection:
+            connection.close()
 
 # =========================================================
 # GET ORDER BY ID
@@ -2039,6 +2465,22 @@ def lambda_handler(
         ):
 
             return create_order(
+                event,
+                authenticated_user
+            )
+
+        # =================================================
+        # PATCH /orders/{id}
+        # CANCEL ORDER
+        # =================================================
+        if (
+            http_method == "PATCH"
+            and event.get("pathParameters")
+            and event[
+                "pathParameters"
+            ].get("id")
+        ):
+            return cancel_order(
                 event,
                 authenticated_user
             )
