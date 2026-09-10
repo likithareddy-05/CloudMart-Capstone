@@ -1097,11 +1097,10 @@ Resources:
   # API DEPLOYMENT
   # =======================================================
 
+
   ApiDeployment:
 
     Type: AWS::ApiGateway::Deployment
-
-    Description: "CloudMart API Deployment - Cancel Order v2"
 
     DependsOn:
 
@@ -1121,9 +1120,28 @@ Resources:
       RestApiId:
         !Ref ApiGateway
 
+
+  # =======================================================
+  # API STAGE
+  # =======================================================
+
+  ApiStage:
+
+    Type: AWS::ApiGateway::Stage
+
+    DependsOn:
+      - ApiDeployment
+
+    Properties:
+
+      RestApiId:
+        !Ref ApiGateway
+
       StageName:
         !Ref Environment
 
+      DeploymentId:
+        !Ref ApiDeployment
 
 # =========================================================
 # OUTPUTS
