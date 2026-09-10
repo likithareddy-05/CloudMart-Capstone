@@ -1101,6 +1101,8 @@ Resources:
 
     Type: AWS::ApiGateway::Deployment
 
+    Description: "CloudMart API Deployment - Cancel Order v2"
+
     DependsOn:
 
       - GetProductsMethod
