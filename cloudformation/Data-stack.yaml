@@ -197,7 +197,52 @@ Resources:
       # ---------------------------------------------------
 
       BackupRetentionPeriod: 0
+  # =======================================================
+  # DATABASE SSM PARAMETERS
+  # =======================================================
 
+  DbHostParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        !Sub /cloudmart/${Environment}/db/host
+      Type: String
+      Value:
+        !GetAtt CloudMartDatabase.Endpoint.Address
+      Description: CloudMart RDS MySQL host
+
+
+  DbPortParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        !Sub /cloudmart/${Environment}/db/port
+      Type: String
+      Value:
+        !GetAtt CloudMartDatabase.Endpoint.Port
+      Description: CloudMart RDS MySQL port
+
+
+  DbNameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        !Sub /cloudmart/${Environment}/db/name
+      Type: String
+      Value:
+        !Ref DBName
+      Description: CloudMart database name
+
+
+  DbUsernameParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name:
+        !Sub /cloudmart/${Environment}/db/username
+      Type: String
+      Value:
+        !Ref DBUsername
+      Description: CloudMart database username
 
   # =======================================================
   # LAMBDA ARTIFACTS S3 BUCKET
