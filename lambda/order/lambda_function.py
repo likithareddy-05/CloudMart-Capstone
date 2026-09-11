@@ -289,6 +289,20 @@ def create_order(
 
     connection = None
 
+    # =================================================
+    # ROLE AUTHORIZATION
+    # =================================================
+    # ADMIN users are for monitoring/management and
+    # cannot place customer orders.
+    if authenticated_user["role"] == "ADMIN":
+        return response(
+            403,
+            {
+                "message":
+                    "ADMIN users are not allowed to place orders"
+            }
+        )
+
     customer_id = authenticated_user["user_id"]
 
     order_id = None
@@ -1538,14 +1552,23 @@ def cancel_order(
                 )
 
             # =============================================
-            # USER CAN ONLY CANCEL OWN ORDER
-            # ADMIN CAN CANCEL ANY ORDER
+            # ROLE AND OWNERSHIP AUTHORIZATION
             # =============================================
-            if (
-                authenticated_user["role"] != "ADMIN"
-                and order["customer_id"]
-                    != authenticated_user["user_id"]
-            ):
+
+            # ADMIN users cannot cancel orders.
+            if authenticated_user["role"] == "ADMIN":
+                connection.rollback()
+
+                return response(
+                    403,
+                    {
+                        "message":
+                            "ADMIN users are not allowed to cancel orders"
+                    }
+                )
+
+            # USER can cancel only their own order.
+            if order["customer_id"] != authenticated_user["user_id"]:
                 connection.rollback()
 
                 return response(

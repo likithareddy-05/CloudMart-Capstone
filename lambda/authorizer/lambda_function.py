@@ -372,10 +372,12 @@ def lambda_handler(event, context):
 
         if role == "ADMIN":
 
-            admin_resource = (
-                api_arn_base
-                + "/*/*"
-            )
+            admin_resource = [
+                api_arn_base + "/GET/*",
+                api_arn_base + "/POST/products",
+                api_arn_base + "/PUT/products/*",
+                api_arn_base + "/DELETE/products/*"
+            ]
 
 
             print(json.dumps({
@@ -395,7 +397,7 @@ def lambda_handler(event, context):
             return create_policy(
                 principal_id=f"cloudmart-admin-{user_id}",
                 effect="Allow",
-                resources=[admin_resource],
+                resources= admin_resource,
                 role="ADMIN",
                 user_id=user_id
             )
