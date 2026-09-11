@@ -499,18 +499,6 @@ DEALLOCATE PREPARE stmt;
 -- =====================================================
 
 -- =====================================================
--- RESET SAMPLE USERS
--- =====================================================
-
--- Remove existing order data first because orders reference users.
-DELETE FROM order_items;
-DELETE FROM orders;
-
--- Remove existing users.
-DELETE FROM users;
-
-
--- =====================================================
 -- SAMPLE CUSTOMERS AND ADMIN
 -- =====================================================
 
