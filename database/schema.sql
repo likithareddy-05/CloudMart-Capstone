@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS users (
 
     role VARCHAR(20) NOT NULL DEFAULT 'USER',
 
+    token_hash VARCHAR(64) UNIQUE,
+
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -315,6 +317,30 @@ DEALLOCATE PREPARE stmt;
 
 
 -- =====================================================
+-- ADD TOKEN_HASH TO EXISTING USERS
+-- =====================================================
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'users'
+      AND column_name = 'token_hash'
+);
+
+SET @sql = IF(
+    @column_exists = 0,
+    'ALTER TABLE users
+     ADD COLUMN token_hash VARCHAR(64) NULL UNIQUE',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
 -- MIGRATE EXISTING ORDERS
 --
 -- Old orders table had:
@@ -472,31 +498,66 @@ DEALLOCATE PREPARE stmt;
 -- SAMPLE USERS
 -- =====================================================
 
-INSERT INTO users
-    (
-        user_id,
-        name,
-        email,
-        role
-    )
-VALUES
-    (
-        1,
-        'CloudMart User',
-        'user@cloudmart.com',
-        'USER'
-    ),
-    (
-        2,
-        'CloudMart Admin',
-        'admin@cloudmart.com',
-        'ADMIN'
-    )
-ON DUPLICATE KEY UPDATE
-    name = VALUES(name),
-    email = VALUES(email),
-    role = VALUES(role);
+-- =====================================================
+-- RESET SAMPLE USERS
+-- =====================================================
 
+-- Remove existing order data first because orders reference users.
+DELETE FROM order_items;
+DELETE FROM orders;
+
+-- Remove existing users.
+DELETE FROM users;
+
+
+-- =====================================================
+-- SAMPLE CUSTOMERS AND ADMIN
+-- =====================================================
+
+INSERT IGNORE INTO users
+(
+    user_id,
+    name,
+    email,
+    role,
+    token_hash
+)
+VALUES
+(
+    1,
+    'User 1',
+    'user1@cloudmart.com',
+    'USER',
+    SHA2('CMUserToken001', 256)
+),
+(
+    2,
+    'User 2',
+    'user2@cloudmart.com',
+    'USER',
+    SHA2('CMUserToken002', 256)
+),
+(
+    3,
+    'User 3',
+    'user3@cloudmart.com',
+    'USER',
+    SHA2('CMUserToken003', 256)
+),
+(
+    4,
+    'User 4',
+    'user4@cloudmart.com',
+    'USER',
+    SHA2('CMUserToken004', 256)
+),
+(
+    5,
+    'Admin',
+    'admin@cloudmart.com',
+    'ADMIN',
+    SHA2('CMAdminToken001', 256)
+);
 
 -- =====================================================
 -- SAMPLE PRODUCTS
