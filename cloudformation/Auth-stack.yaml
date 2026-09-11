@@ -3,8 +3,8 @@ AWSTemplateFormatVersion: '2010-09-09'
 Description: >
   CloudMart Authentication Stack.
   Creates the Lambda Authorizer used by API Gateway.
-  Authentication tokens are stored as SecureString
-  parameters in AWS Systems Manager Parameter Store.
+  The Authorizer validates bearer tokens against
+  SHA-256 token hashes stored in the RDS users table.
 
 
 # =========================================================
@@ -25,44 +25,63 @@ Parameters:
     Description: Deployment environment
 
 
-  UserTokenParameterName:
+  # =======================================================
+  # DATABASE SSM PARAMETERS
+  # =======================================================
+
+  DbHostParameterName:
     Type: String
 
-    Default: /cloudmart/dev/auth/user-token
+    Default: /cloudmart/dev/db/host
 
     Description: >
-      SSM Parameter Store path containing the
-      USER authentication token.
+      SSM Parameter Store path containing
+      the RDS MySQL host.
 
 
-  AdminTokenParameterName:
+  DbPortParameterName:
     Type: String
 
-    Default: /cloudmart/dev/auth/admin-token
+    Default: /cloudmart/dev/db/port
 
     Description: >
-      SSM Parameter Store path containing the
-      ADMIN authentication token.
+      SSM Parameter Store path containing
+      the RDS MySQL port.
 
-  UserIdParameterName:
+
+  DbNameParameterName:
     Type: String
 
-    Default: /cloudmart/dev/auth/user-id
+    Default: /cloudmart/dev/db/name
 
     Description: >
-      SSM Parameter Store path containing the
-      USER database user ID.
+      SSM Parameter Store path containing
+      the CloudMart database name.
 
 
-  AdminIdParameterName:
+  DbUsernameParameterName:
     Type: String
 
-    Default: /cloudmart/dev/auth/admin-id
+    Default: /cloudmart/dev/db/username
 
     Description: >
-      SSM Parameter Store path containing the
-      ADMIN database user ID.
+      SSM Parameter Store path containing
+      the RDS database username.
 
+
+  DbPasswordParameterName:
+    Type: String
+
+    Default: /cloudmart/dev/db/password
+
+    Description: >
+      SSM SecureString parameter containing
+      the RDS database password.
+
+
+  # =======================================================
+  # LAMBDA PACKAGE
+  # =======================================================
 
   LambdaS3Key:
     Type: String
@@ -149,11 +168,11 @@ Resources:
 
 
         # =================================================
-        # SSM TOKEN ACCESS
+        # SSM DATABASE PARAMETER ACCESS
         # =================================================
 
         - PolicyName:
-            !Sub CloudMart-${Environment}-AuthorizerSSM
+            !Sub CloudMart-${Environment}-AuthorizerDBSSM
 
           PolicyDocument:
 
@@ -169,25 +188,47 @@ Resources:
 
                 Resource:
 
-                  # USER SecureString
+                  # DB HOST
                   - !Sub
                     - arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}
-                    - ParameterName: !Ref UserTokenParameterName
+                    - ParameterName: !Ref DbHostParameterName
 
-                  # ADMIN SecureString
+                  # DB PORT
                   - !Sub
                     - arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}
-                    - ParameterName: !Ref AdminTokenParameterName
+                    - ParameterName: !Ref DbPortParameterName
 
-                  # USER ID
+                  # DB NAME
                   - !Sub
                     - arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}
-                    - ParameterName: !Ref UserIdParameterName
+                    - ParameterName: !Ref DbNameParameterName
 
-                  # ADMIN ID
+                  # DB USERNAME
                   - !Sub
                     - arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}
-                    - ParameterName: !Ref AdminIdParameterName
+                    - ParameterName: !Ref DbUsernameParameterName
+
+                  # DB PASSWORD
+                  - !Sub
+                    - arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterName}
+                    - ParameterName: !Ref DbPasswordParameterName
+
+        - PolicyName:
+            !Sub CloudMart-${Environment}-AuthorizerVPCAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeVpcs
+                  - ec2:AssignPrivateIpAddresses
+                  - ec2:UnassignPrivateIpAddresses
+                Resource: "*"
 
 
   # =======================================================
@@ -216,6 +257,23 @@ Resources:
 
 
       # ---------------------------------------------------
+      # VPC CONFIGURATION
+      # ---------------------------------------------------
+
+      VpcConfig:
+
+        SubnetIds:
+
+          - Fn::ImportValue:
+              !Sub CloudMart-${Environment}-PrivateSubnetId
+
+        SecurityGroupIds:
+
+          - Fn::ImportValue:
+              !Sub CloudMart-${Environment}-LambdaSecurityGroupId
+
+
+      # ---------------------------------------------------
       # ENVIRONMENT VARIABLES
       # ---------------------------------------------------
 
@@ -223,17 +281,20 @@ Resources:
 
         Variables:
 
-          USER_TOKEN_PARAMETER:
-            !Ref UserTokenParameterName
+          DB_HOST_PARAMETER:
+            !Ref DbHostParameterName
 
-          ADMIN_TOKEN_PARAMETER:
-            !Ref AdminTokenParameterName
+          DB_PORT_PARAMETER:
+            !Ref DbPortParameterName
 
-          USER_ID_PARAMETER:
-            !Ref UserIdParameterName
+          DB_NAME_PARAMETER:
+            !Ref DbNameParameterName
 
-          ADMIN_ID_PARAMETER:
-            !Ref AdminIdParameterName
+          DB_USERNAME_PARAMETER:
+            !Ref DbUsernameParameterName
+
+          DB_PASSWORD_PARAMETER:
+            !Ref DbPasswordParameterName
 
 
       # ---------------------------------------------------
@@ -275,40 +336,6 @@ Resources:
 # =========================================================
 
 Outputs:
-
-
-  # =======================================================
-  # USER PARAMETER NAME
-  # =======================================================
-
-  UserTokenParameterName:
-
-    Description:
-      USER authentication token SSM parameter name
-
-    Value:
-      !Ref UserTokenParameterName
-
-    Export:
-      Name:
-        !Sub CloudMart-${Environment}-UserTokenParameterName
-
-
-  # =======================================================
-  # ADMIN PARAMETER NAME
-  # =======================================================
-
-  AdminTokenParameterName:
-
-    Description:
-      ADMIN authentication token SSM parameter name
-
-    Value:
-      !Ref AdminTokenParameterName
-
-    Export:
-      Name:
-        !Sub CloudMart-${Environment}-AdminTokenParameterName
 
 
   # =======================================================

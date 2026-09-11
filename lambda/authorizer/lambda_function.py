@@ -1,41 +1,108 @@
 import json
 import os
-import boto3 #Communicates with AWS services
-import hmac #Secure token comparison
+import hashlib
+
+import boto3
+import pymysql
 
 
 # =========================================================
 # AWS CLIENT
 # =========================================================
-#Get RDS credentials
+
 ssm = boto3.client("ssm")
 
 
 # =========================================================
 # ENVIRONMENT VARIABLES
 # =========================================================
-#contain the paths of the SSM parameters.
-USER_TOKEN_PARAMETER = os.environ["USER_TOKEN_PARAMETER"]
 
-ADMIN_TOKEN_PARAMETER = os.environ["ADMIN_TOKEN_PARAMETER"]
+DB_HOST_PARAMETER = os.environ["DB_HOST_PARAMETER"]
+DB_PORT_PARAMETER = os.environ["DB_PORT_PARAMETER"]
+DB_NAME_PARAMETER = os.environ["DB_NAME_PARAMETER"]
+DB_USERNAME_PARAMETER = os.environ["DB_USERNAME_PARAMETER"]
+DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
 
-USER_ID_PARAMETER = os.environ["USER_ID_PARAMETER"]
-
-ADMIN_ID_PARAMETER = os.environ["ADMIN_ID_PARAMETER"]
-#It gets the parameter name from its environment variables
 
 # =========================================================
-# GET TOKEN FROM SSM
+# GET PARAMETER FROM SSM
 # =========================================================
-#retrieves the actual value from SSM.
+
 def get_parameter(parameter_name):
-
     response = ssm.get_parameter(
         Name=parameter_name,
         WithDecryption=True
     )
 
     return response["Parameter"]["Value"]
+
+
+# =========================================================
+# GET DATABASE CONNECTION
+# =========================================================
+
+def get_db_connection():
+    host = get_parameter(DB_HOST_PARAMETER)
+    port = int(get_parameter(DB_PORT_PARAMETER))
+    database = get_parameter(DB_NAME_PARAMETER)
+    username = get_parameter(DB_USERNAME_PARAMETER)
+    password = get_parameter(DB_PASSWORD_PARAMETER)
+
+    return pymysql.connect(
+        host=host,
+        port=port,
+        user=username,
+        password=password,
+        database=database,
+        connect_timeout=5,
+        read_timeout=5,
+        write_timeout=5,
+        cursorclass=pymysql.cursors.DictCursor
+    )
+
+
+# =========================================================
+# HASH TOKEN
+# =========================================================
+
+def hash_token(token):
+    return hashlib.sha256(
+        token.encode("utf-8")
+    ).hexdigest()
+
+
+# =========================================================
+# FIND USER BY TOKEN
+# =========================================================
+
+def get_user_by_token(provided_token):
+    token_hash = hash_token(provided_token)
+
+    connection = None
+
+    try:
+        connection = get_db_connection()
+
+        with connection.cursor() as cursor:
+
+            cursor.execute(
+                """
+                SELECT
+                    user_id,
+                    role
+                FROM users
+                WHERE token_hash = %s
+                LIMIT 1
+                """,
+                (token_hash,)
+            )
+
+            return cursor.fetchone()
+
+    finally:
+        if connection:
+            connection.close()
+
 
 # =========================================================
 # CREATE IAM POLICY
@@ -52,7 +119,6 @@ def create_policy(
     statements = []
 
     for resource in resources:
-
         statements.append(
             {
                 "Action": "execute-api:Invoke",
@@ -66,20 +132,14 @@ def create_policy(
     }
 
     if user_id is not None:
-
         context["user_id"] = str(user_id)
 
     return {
-
         "principalId": principal_id,
-
         "policyDocument": {
-
             "Version": "2012-10-17",
-
             "Statement": statements
         },
-
         "context": context
     }
 
@@ -87,32 +147,15 @@ def create_policy(
 # =========================================================
 # CREATE API ARN BASE
 # =========================================================
-#API Gateway sends the Authorizer something called
+
 def get_api_arn_base(method_arn):
-#It identifies the specific API request
-    """
-    Example methodArn:
-
-    arn:aws:execute-api:ap-south-1:123456789012:api-id/dev/GET/products/1
-
-    We extract:
-
-    arn:aws:execute-api:ap-south-1:123456789012:api-id/dev
-    """
 
     arn_parts = method_arn.split("/")
 
     if len(arn_parts) < 3:
+        raise Exception("Invalid methodArn")
 
-        raise Exception(
-            "Invalid methodArn"
-        )
-
-    api_arn_base = "/".join(
-        arn_parts[:2]
-    )
-
-    return api_arn_base
+    return "/".join(arn_parts[:2])
 
 
 # =========================================================
@@ -222,69 +265,43 @@ def lambda_handler(event, context):
 
 
         # =================================================
-        # USER TOKEN
+        # FIND USER IN RDS
         # =================================================
 
-        user_token = get_parameter(
-            USER_TOKEN_PARAMETER
+        user = get_user_by_token(
+            provided_token
         )
 
 
         # =================================================
-        # CHECK USER TOKEN
+        # INVALID TOKEN
         # =================================================
 
-        if hmac.compare_digest(
-            provided_token,
-            user_token
-        ):
-
-            role = "USER"
+        if not user:
 
             print(json.dumps({
-                "event": "token_validated",
-                "role": "USER",
+                "event": "authorization_failed",
+                "reason": "invalid_token",
                 "method": http_method
             }))
 
-
-        else:
-
-            # =============================================
-            # ADMIN TOKEN
-            # =============================================
-
-            admin_token = get_parameter(
-                ADMIN_TOKEN_PARAMETER
-            )
+            raise Exception("Unauthorized")
 
 
-            # =============================================
-            # CHECK ADMIN TOKEN
-            # =============================================
+        # =================================================
+        # GET USER DETAILS
+        # =================================================
 
-            if hmac.compare_digest(
-                provided_token,
-                admin_token
-            ):
-
-                role = "ADMIN"
-
-                print(json.dumps({
-                    "event": "token_validated",
-                    "role": "ADMIN",
-                    "method": http_method
-                }))
+        user_id = int(user["user_id"])
+        role = user["role"].upper()
 
 
-            else:
-
-                print(json.dumps({
-                    "event": "authorization_failed",
-                    "reason": "invalid_token"
-                }))
-
-                raise Exception("Unauthorized")
+        print(json.dumps({
+            "event": "token_validated",
+            "user_id": user_id,
+            "role": role,
+            "method": http_method
+        }))
 
 
         # =================================================
@@ -294,7 +311,7 @@ def lambda_handler(event, context):
         #
         # GET  /*
         # POST /orders
-        # PATCH /orders/{id}
+        # PATCH /orders/*
         #
         # USER CANNOT:
         #
@@ -307,46 +324,37 @@ def lambda_handler(event, context):
 
             user_resources = [
 
-                # USER can read products and orders
+                # Read products/orders
                 api_arn_base + "/GET/*",
 
-                # USER can create orders
+                # Create orders
                 api_arn_base + "/POST/orders",
 
-                # USER can request cancellation
-                # Order Lambda checks order ownership
+                # Cancel orders
                 api_arn_base + "/PATCH/orders/*"
-
             ]
 
-            # -------------------------------------------------
-            # SAMPLE USER
-            #
-            # User ID is retrieved from SSM Parameter Store.
-            # -------------------------------------------------
-
-            user_id = int(
-                get_parameter(USER_ID_PARAMETER)
-            )
 
             print(json.dumps({
                 "event": "authorization_success",
-                "role": "USER",
                 "user_id": user_id,
+                "role": "USER",
                 "allowed_methods": [
                     "GET",
                     "POST /orders",
-                    "PATCH /orders/{id}"
+                    "PATCH /orders/*"
                 ]
             }))
 
+
             return create_policy(
-                "cloudmart-user",
-                "Allow",
-                user_resources,
-                "USER",
+                principal_id=f"cloudmart-user-{user_id}",
+                effect="Allow",
+                resources=user_resources,
+                role="USER",
                 user_id=user_id
             )
+
 
         # =================================================
         # ADMIN POLICY
@@ -356,9 +364,10 @@ def lambda_handler(event, context):
         # GET
         # POST
         # PUT
+        # PATCH
         # DELETE
         #
-        # Allow all methods/resources under this API stage.
+        # Allow all methods/resources under API stage.
         # =================================================
 
         if role == "ADMIN":
@@ -368,29 +377,27 @@ def lambda_handler(event, context):
                 + "/*/*"
             )
 
-            admin_user_id = int(
-                get_parameter(ADMIN_ID_PARAMETER)
-            )
-
 
             print(json.dumps({
                 "event": "authorization_success",
+                "user_id": user_id,
                 "role": "ADMIN",
                 "allowed_methods": [
                     "GET",
                     "POST",
                     "PUT",
+                    "PATCH",
                     "DELETE"
                 ]
             }))
 
 
             return create_policy(
-                "cloudmart-admin",
-                "Allow",
-                [admin_resource],
-                "ADMIN",
-                user_id=admin_user_id
+                principal_id=f"cloudmart-admin-{user_id}",
+                effect="Allow",
+                resources=[admin_resource],
+                role="ADMIN",
+                user_id=user_id
             )
 
 
@@ -400,7 +407,8 @@ def lambda_handler(event, context):
 
         print(json.dumps({
             "event": "authorization_failed",
-            "reason": "unknown_role"
+            "reason": "unknown_role",
+            "user_id": user_id
         }))
 
         raise Exception("Unauthorized")
@@ -414,7 +422,7 @@ def lambda_handler(event, context):
 
         print(json.dumps({
             "event": "authorization_error",
-            "reason": str(error)
+            "reason": "authorization_failed"
         }))
 
         raise Exception("Unauthorized")
