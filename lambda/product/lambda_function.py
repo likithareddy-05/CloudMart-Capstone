@@ -382,6 +382,29 @@ def lambda_handler(
 
 
         # =================================================
+        # GET AUTHENTICATED USER ROLE
+        # =================================================
+
+        authorizer_context = (
+            event.get(
+                "requestContext",
+                {}
+            )
+            .get(
+                "authorizer",
+                {}
+            )
+        )
+
+        user_role = str(
+            authorizer_context.get(
+                "role",
+                "USER"
+            )
+        ).upper()
+
+
+        # =================================================
         # CONNECT TO RDS
         # =================================================
 
@@ -411,43 +434,68 @@ def lambda_handler(
                 and not product_id
             ):
 
-                cursor.execute(
+                # ADMIN -> ALL PRODUCTS
+                # Includes deleted products and is_deleted.
 
-                    """
-                    SELECT
-                        p.product_id,
-                        p.name,
-                        p.description,
-                        p.price,
-                        p.category,
-                        i.stock_count,
-                        i.low_stock_threshold,
-                        p.created_at,
-                        p.updated_at
-                    FROM products p
-                    LEFT JOIN inventory i
-                        ON p.product_id =
-                           i.product_id
-                    WHERE p.is_deleted = FALSE
-                    ORDER BY p.product_id
-                    """
-                )
+                if user_role == "ADMIN":
+
+                    cursor.execute(
+                        """
+                        SELECT
+                            p.product_id,
+                            p.name,
+                            p.description,
+                            p.price,
+                            p.category,
+                            i.stock_count,
+                            i.low_stock_threshold,
+                            p.created_at,
+                            p.updated_at,
+                            p.is_deleted
+                        FROM products p
+                        LEFT JOIN inventory i
+                            ON p.product_id =
+                               i.product_id
+                        ORDER BY p.product_id
+                        """
+                    )
+
+                # USER -> ONLY AVAILABLE PRODUCTS
+
+                else:
+
+                    cursor.execute(
+                        """
+                        SELECT
+                            p.product_id,
+                            p.name,
+                            p.description,
+                            p.price,
+                            p.category,
+                            i.stock_count,
+                            i.low_stock_threshold,
+                            p.created_at,
+                            p.updated_at
+                        FROM products p
+                        LEFT JOIN inventory i
+                            ON p.product_id =
+                               i.product_id
+                        WHERE p.is_deleted = FALSE
+                        ORDER BY p.product_id
+                        """
+                    )
 
                 products = cursor.fetchall()
 
                 log_event(
-
                     "products_retrieved",
-
                     count=len(products),
-
+                    role=user_role,
                     status="success"
                 )
 
                 return create_response(
-
                     200,
-
                     products
                 )
 
@@ -461,45 +509,70 @@ def lambda_handler(
                 and product_id
             ):
 
-                cursor.execute(
+                # ADMIN -> ACTIVE + DELETED PRODUCT
 
-                    """
-                    SELECT
-                        p.product_id,
-                        p.name,
-                        p.description,
-                        p.price,
-                        p.category,
-                        i.stock_count,
-                        i.low_stock_threshold,
-                        p.created_at,
-                        p.updated_at
-                    FROM products p
-                    LEFT JOIN inventory i
-                        ON p.product_id =
-                           i.product_id
-                    WHERE p.product_id = %s
-                      AND p.is_deleted = FALSE
-                    """,
+                if user_role == "ADMIN":
 
-                    (product_id,)
-                )
+                    cursor.execute(
+                        """
+                        SELECT
+                            p.product_id,
+                            p.name,
+                            p.description,
+                            p.price,
+                            p.category,
+                            i.stock_count,
+                            i.low_stock_threshold,
+                            p.created_at,
+                            p.updated_at,
+                            p.is_deleted
+                        FROM products p
+                        LEFT JOIN inventory i
+                            ON p.product_id =
+                               i.product_id
+                        WHERE p.product_id = %s
+                        """,
+                        (product_id,)
+                    )
+
+                # USER -> ONLY AVAILABLE PRODUCT
+
+                else:
+
+                    cursor.execute(
+                        """
+                        SELECT
+                            p.product_id,
+                            p.name,
+                            p.description,
+                            p.price,
+                            p.category,
+                            i.stock_count,
+                            i.low_stock_threshold,
+                            p.created_at,
+                            p.updated_at
+                        FROM products p
+                        LEFT JOIN inventory i
+                            ON p.product_id =
+                               i.product_id
+                        WHERE p.product_id = %s
+                          AND p.is_deleted = FALSE
+                        """,
+                        (product_id,)
+                    )
 
                 product = cursor.fetchone()
 
                 if not product:
 
                     log_event(
-
                         "product_not_found",
-
-                        product_id=product_id
+                        product_id=product_id,
+                        role=user_role
                     )
 
                     return create_response(
-
                         404,
-
                         {
                             "message":
                                 "Product not found"
@@ -507,18 +580,14 @@ def lambda_handler(
                     )
 
                 log_event(
-
                     "product_retrieved",
-
                     product_id=product_id,
-
+                    role=user_role,
                     status="success"
                 )
 
                 return create_response(
-
                     200,
-
                     product
                 )
 
