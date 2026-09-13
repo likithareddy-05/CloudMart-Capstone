@@ -88,7 +88,7 @@ Parameters:
     Default: /cloudmart/dev/db/password
 
     Description:
-      SSM parameter containing the database password
+      SSM SecureString parameter containing the database password
 
 
 # ============================================================

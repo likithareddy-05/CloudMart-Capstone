@@ -1,0 +1,439 @@
+name: Deploy Reporting Stack
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  ENVIRONMENT: dev
+
+  STACK_NAME: cloudmart-dev-reporting
+
+  # Existing Lambda deployment bucket
+  LAMBDA_S3_BUCKET: cloudmart-dev-lambda-430155298316
+
+  # Existing Reports bucket
+  REPORTS_BUCKET: cloudmart-dev-reports-430155298316
+
+  # Reporting Lambda source
+  REPORT_LAMBDA_SOURCE: lambda/report/lambda_function.py
+
+  # SSM DB parameter names
+  DB_HOST_PARAMETER: /cloudmart/dev/db/host
+  DB_PORT_PARAMETER: /cloudmart/dev/db/port
+  DB_NAME_PARAMETER: /cloudmart/dev/db/name
+  DB_USERNAME_PARAMETER: /cloudmart/dev/db/username
+  DB_PASSWORD_PARAMETER: /cloudmart/dev/db/password
+
+
+jobs:
+
+  deploy:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # =====================================================
+      # 1. CHECKOUT REPOSITORY
+      # =====================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # =====================================================
+      # 2. CONFIGURE AWS CREDENTIALS
+      # =====================================================
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # =====================================================
+      # 3. VERIFY AWS IDENTITY
+      # =====================================================
+
+      - name: Verify AWS identity
+        run: |
+          aws sts get-caller-identity
+
+
+      # =====================================================
+      # 4. VERIFY EXISTING LAMBDA S3 BUCKET
+      # =====================================================
+
+      - name: Verify Lambda S3 bucket
+        run: |
+
+          echo "Checking existing Lambda deployment bucket..."
+
+          aws s3api head-bucket \
+            --bucket "$LAMBDA_S3_BUCKET"
+
+          echo "Lambda bucket exists."
+
+
+      # =====================================================
+      # 5. VERIFY EXISTING REPORTS BUCKET
+      # =====================================================
+
+      - name: Verify Reports S3 bucket
+        run: |
+
+          echo "Checking existing Reports bucket..."
+
+          aws s3api head-bucket \
+            --bucket "$REPORTS_BUCKET"
+
+          echo "Reports bucket exists."
+
+
+      # =====================================================
+      # 6. VERIFY REPORT LAMBDA SOURCE
+      # =====================================================
+
+      - name: Verify report Lambda source
+        run: |
+
+          echo "Checking Lambda source..."
+
+          test -f "$REPORT_LAMBDA_SOURCE"
+
+          echo "Report Lambda source found:"
+          echo "$REPORT_LAMBDA_SOURCE"
+
+
+      # =====================================================
+      # 7. CREATE LAMBDA PACKAGE DIRECTORY
+      # =====================================================
+
+      - name: Prepare Lambda package
+        run: |
+
+          rm -rf build/report
+
+          mkdir -p build/report
+
+          echo "Package directory created."
+
+
+      # =====================================================
+      # 8. INSTALL PYMYSQL
+      # =====================================================
+
+      - name: Install Lambda dependencies
+        run: |
+
+          python -m pip install \
+            PyMySQL \
+            -t build/report
+
+          echo "PyMySQL installed."
+
+
+      # =====================================================
+      # 9. COPY LAMBDA CODE
+      # =====================================================
+
+      - name: Copy Lambda source
+        run: |
+
+          cp "$REPORT_LAMBDA_SOURCE" \
+             build/report/lambda_function.py
+
+          echo "Lambda source copied."
+
+
+      # =====================================================
+      # 10. CREATE ZIP PACKAGE
+      # =====================================================
+
+      - name: Package Reporting Lambda
+        run: |
+
+          cd build/report
+
+          zip -r ../../report.zip .
+
+          cd ../..
+
+          echo "Lambda package created."
+
+          ls -lh report.zip
+
+
+      # =====================================================
+      # 11. UPLOAD LAMBDA PACKAGE TO EXISTING S3 BUCKET
+      # =====================================================
+
+      - name: Upload Lambda package
+        env:
+          LAMBDA_S3_KEY: report/report-${{ github.sha }}.zip
+
+        run: |
+
+          echo "Uploading Reporting Lambda package..."
+
+          aws s3 cp \
+            report.zip \
+            "s3://${LAMBDA_S3_BUCKET}/${LAMBDA_S3_KEY}"
+
+          echo "Uploaded:"
+          echo "s3://${LAMBDA_S3_BUCKET}/${LAMBDA_S3_KEY}"
+
+          echo "LAMBDA_S3_KEY=$LAMBDA_S3_KEY" >> "$GITHUB_ENV"
+
+
+      # =====================================================
+      # 12. VALIDATE REPORTING CLOUDFORMATION TEMPLATE
+      # =====================================================
+
+      - name: Validate Reporting Stack
+        run: |
+
+          aws cloudformation validate-template \
+            --template-body file://cloudformation/Reporting-stack.yaml \
+            --region "$AWS_REGION"
+
+          echo "Reporting Stack template is valid."
+
+
+      # =====================================================
+      # 13. CHECK REPORTING STACK
+      # =====================================================
+
+      - name: Check Reporting Stack
+        id: stack
+        run: |
+
+          if aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --region "$AWS_REGION" \
+            > /dev/null 2>&1; then
+
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+
+            echo "Reporting Stack already exists."
+
+          else
+
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+
+            echo "Reporting Stack does not exist."
+
+          fi
+
+
+      # =====================================================
+      # 14. CREATE REPORTING STACK
+      # =====================================================
+
+      - name: Create Reporting Stack
+        if: steps.stack.outputs.exists == 'false'
+
+        run: |
+
+          echo "Creating Reporting Stack..."
+
+          aws cloudformation create-stack \
+            --stack-name "$STACK_NAME" \
+            --template-body file://cloudformation/Reporting-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+              ParameterKey=LambdaS3Bucket,ParameterValue="$LAMBDA_S3_BUCKET" \
+              ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
+              ParameterKey=ReportsBucketName,ParameterValue="$REPORTS_BUCKET" \
+              ParameterKey=DbHostParameterName,ParameterValue="$DB_HOST_PARAMETER" \
+              ParameterKey=DbPortParameterName,ParameterValue="$DB_PORT_PARAMETER" \
+              ParameterKey=DbNameParameterName,ParameterValue="$DB_NAME_PARAMETER" \
+              ParameterKey=DbUsernameParameterName,ParameterValue="$DB_USERNAME_PARAMETER" \
+              ParameterKey=DbPasswordParameterName,ParameterValue="$DB_PASSWORD_PARAMETER" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION"
+
+          echo "Reporting Stack creation started."
+
+
+      # =====================================================
+      # 15. UPDATE REPORTING STACK
+      # =====================================================
+
+      - name: Update Reporting Stack
+        if: steps.stack.outputs.exists == 'true'
+
+        run: |
+
+          echo "Updating Reporting Stack..."
+
+          set +e
+
+          UPDATE_OUTPUT=$(aws cloudformation update-stack \
+            --stack-name "$STACK_NAME" \
+            --template-body file://cloudformation/Reporting-stack.yaml \
+            --parameters \
+              ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+              ParameterKey=LambdaS3Bucket,ParameterValue="$LAMBDA_S3_BUCKET" \
+              ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
+              ParameterKey=ReportsBucketName,ParameterValue="$REPORTS_BUCKET" \
+              ParameterKey=DbHostParameterName,ParameterValue="$DB_HOST_PARAMETER" \
+              ParameterKey=DbPortParameterName,ParameterValue="$DB_PORT_PARAMETER" \
+              ParameterKey=DbNameParameterName,ParameterValue="$DB_NAME_PARAMETER" \
+              ParameterKey=DbUsernameParameterName,ParameterValue="$DB_USERNAME_PARAMETER" \
+              ParameterKey=DbPasswordParameterName,ParameterValue="$DB_PASSWORD_PARAMETER" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION" 2>&1)
+
+          UPDATE_EXIT_CODE=$?
+
+          echo "$UPDATE_OUTPUT"
+
+          set -e
+
+          if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
+
+            echo "No CloudFormation changes detected."
+
+          elif [ "$UPDATE_EXIT_CODE" -ne 0 ]; then
+
+            echo "CloudFormation update failed."
+
+            exit "$UPDATE_EXIT_CODE"
+
+          else
+
+            echo "Reporting Stack update started."
+
+          fi
+
+
+      # =====================================================
+      # 16. WAIT FOR STACK COMPLETION
+      # =====================================================
+
+      - name: Wait for Reporting Stack
+        run: |
+
+          STATUS=$(aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].StackStatus' \
+            --output text \
+            --region "$AWS_REGION")
+
+          echo "Current stack status: $STATUS"
+
+          case "$STATUS" in
+
+            CREATE_IN_PROGRESS)
+
+              echo "Waiting for stack creation..."
+
+              aws cloudformation wait stack-create-complete \
+                --stack-name "$STACK_NAME" \
+                --region "$AWS_REGION"
+
+              ;;
+
+            UPDATE_IN_PROGRESS)
+
+              echo "Waiting for stack update..."
+
+              aws cloudformation wait stack-update-complete \
+                --stack-name "$STACK_NAME" \
+                --region "$AWS_REGION"
+
+              ;;
+
+            CREATE_COMPLETE|UPDATE_COMPLETE)
+
+              echo "Stack already completed."
+
+              ;;
+
+            *)
+
+              echo "Unexpected stack status: $STATUS"
+
+              exit 1
+
+              ;;
+
+          esac
+
+
+      # =====================================================
+      # 17. DISPLAY STACK STATUS
+      # =====================================================
+
+      - name: Display stack status
+        run: |
+
+          aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].[StackName,StackStatus]' \
+            --output table \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 18. DISPLAY STACK OUTPUTS
+      # =====================================================
+
+      - name: Display Reporting Stack outputs
+        run: |
+
+          echo "=========================================="
+          echo "REPORTING STACK OUTPUTS"
+          echo "=========================================="
+
+          aws cloudformation describe-stacks \
+            --stack-name "$STACK_NAME" \
+            --query 'Stacks[0].Outputs[*].[OutputKey,OutputValue]' \
+            --output table \
+            --region "$AWS_REGION"
+
+
+      # =====================================================
+      # 19. VERIFY LAMBDA
+      # =====================================================
+
+      - name: Verify Reporting Lambda
+        run: |
+
+          echo "=========================================="
+          echo "REPORTING LAMBDA"
+          echo "=========================================="
+
+          aws lambda get-function \
+            --function-name "CloudMart-${ENVIRONMENT}-ReportGenerator" \
+            --region "$AWS_REGION" \
+            --query 'Configuration.[FunctionName,Runtime,Handler,Timeout,MemorySize]' \
+            --output table
+
+
+      # =====================================================
+      # 20. VERIFY EVENTBRIDGE RULE
+      # =====================================================
+
+      - name: Verify Reporting Schedule
+        run: |
+
+          echo "=========================================="
+          echo "REPORTING SCHEDULE"
+          echo "=========================================="
+
+          aws events list-rules \
+            --name-prefix "CloudMart-${ENVIRONMENT}" \
+            --region "$AWS_REGION" \
+            --query 'Rules[*].[Name,State,ScheduleExpression]' \
+            --output table
+
+          echo "Reporting deployment completed successfully."
