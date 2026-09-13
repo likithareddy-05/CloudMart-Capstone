@@ -561,6 +561,48 @@ Resources:
         - Key: Name
           Value: !Sub cloudmart-${Environment}-eventbridge-endpoint
 
+  # =========================================================
+  # S3 VPC GATEWAY ENDPOINT
+  # =========================================================
+  #
+  # Allows private Lambda functions to access
+  # the CloudMart Reports S3 bucket without
+  # requiring a NAT Gateway or Internet Gateway.
+  #
+  # Flow:
+  #
+  # Report Lambda
+  #      |
+  #      v
+  # Private Route Table
+  #      |
+  #      v
+  # S3 Gateway Endpoint
+  #      |
+  #      v
+  # Amazon S3
+  #
+  # =========================================================
+
+  S3VpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+
+    Properties:
+
+      VpcId:
+        !Ref CloudMartVPC
+
+      ServiceName:
+        !Sub com.amazonaws.${AWS::Region}.s3
+
+      VpcEndpointType: Gateway
+
+      RouteTableIds:
+        - !Ref PrivateRouteTable
+
+      Tags:
+        - Key: Name
+          Value: !Sub cloudmart-${Environment}-s3-endpoint
 
 # =========================================================
 # OUTPUTS
@@ -740,3 +782,19 @@ Outputs:
     Export:
       Name:
         !Sub CloudMart-${Environment}-EventBridgeVpcEndpointId
+
+  # =========================================================
+  # S3 VPC ENDPOINT
+  # =========================================================
+
+  S3VpcEndpointId:
+
+    Description:
+      S3 VPC gateway endpoint
+
+    Value:
+      !Ref S3VpcEndpoint
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-S3VpcEndpointId

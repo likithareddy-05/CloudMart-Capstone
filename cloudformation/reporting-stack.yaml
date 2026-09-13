@@ -1,0 +1,354 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: CloudMart Reporting Stack
+
+Parameters:
+
+  Environment:
+    Type: String
+    Default: dev
+
+  LambdaS3Bucket:
+    Type: String
+    Description: S3 bucket containing packaged Lambda code
+
+  LambdaS3Key:
+    Type: String
+    Description: S3 key for the reporting Lambda package
+
+  DbHostParameterName:
+    Type: String
+    Default: /cloudmart/dev/db/host
+
+  DbPortParameterName:
+    Type: String
+    Default: /cloudmart/dev/db/port
+
+  DbNameParameterName:
+    Type: String
+    Default: /cloudmart/dev/db/name
+
+  DbUsernameParameterName:
+    Type: String
+    Default: /cloudmart/dev/db/username
+
+  DbPasswordParameterName:
+    Type: String
+    Default: /cloudmart/dev/db/password
+
+
+Resources:
+
+  # ============================================================
+  # S3 REPORTS BUCKET
+  # ============================================================
+
+  ReportsBucket:
+    Type: AWS::S3::Bucket
+
+    Properties:
+
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+      VersioningConfiguration:
+        Status: Enabled
+
+      Tags:
+        - Key: Project
+          Value: CloudMart
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # ============================================================
+  # REPORT LAMBDA IAM ROLE
+  # ============================================================
+
+  ReportLambdaRole:
+    Type: AWS::IAM::Role
+
+    Properties:
+
+      RoleName:
+        !Sub CloudMart-${Environment}-ReportLambdaRole
+
+      AssumeRolePolicyDocument:
+
+        Version: '2012-10-17'
+
+        Statement:
+
+          - Effect: Allow
+
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+
+            Action:
+              - sts:AssumeRole
+
+
+      ManagedPolicyArns:
+
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+
+      Policies:
+
+        - PolicyName:
+            !Sub CloudMart-${Environment}-ReportLambdaPolicy
+
+          PolicyDocument:
+
+            Version: '2012-10-17'
+
+            Statement:
+
+              # ------------------------------------------------
+              # Read DB configuration from SSM
+              # ------------------------------------------------
+
+              - Effect: Allow
+
+                Action:
+                  - ssm:GetParameter
+
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DbHostParameterName}
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DbPortParameterName}
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DbNameParameterName}
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DbUsernameParameterName}
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DbPasswordParameterName}
+
+
+              # ------------------------------------------------
+              # S3 report write access
+              # ------------------------------------------------
+
+              - Effect: Allow
+
+                Action:
+                  - s3:PutObject
+
+                Resource:
+                  - !Sub ${ReportsBucket.Arn}/reports/*
+
+
+              # ------------------------------------------------
+              # CloudWatch custom metrics
+              # ------------------------------------------------
+
+              - Effect: Allow
+
+                Action:
+                  - cloudwatch:PutMetricData
+
+                Resource: "*"
+
+
+  # ============================================================
+  # REPORT GENERATOR LAMBDA
+  # ============================================================
+
+  ReportGeneratorLambda:
+    Type: AWS::Lambda::Function
+
+    Properties:
+
+      FunctionName:
+        !Sub CloudMart-${Environment}-ReportGenerator
+
+      Runtime: python3.12
+
+      Handler: lambda_function.lambda_handler
+
+      Timeout: 60
+
+      MemorySize: 256
+
+      Role:
+        !GetAtt ReportLambdaRole.Arn
+
+      Code:
+
+        S3Bucket:
+          !Ref LambdaS3Bucket
+
+        S3Key:
+          !Ref LambdaS3Key
+
+
+      # --------------------------------------------------------
+      # EXISTING NETWORK RESOURCES
+      # --------------------------------------------------------
+
+      VpcConfig:
+
+        SubnetIds:
+
+          - !ImportValue
+              Fn::Sub: CloudMart-${Environment}-PrivateSubnetId
+
+        SecurityGroupIds:
+
+          - !ImportValue
+              Fn::Sub: CloudMart-${Environment}-LambdaSecurityGroupId
+
+
+      # --------------------------------------------------------
+      # ENVIRONMENT VARIABLES
+      # --------------------------------------------------------
+
+      Environment:
+
+        Variables:
+
+          REPORTS_BUCKET:
+            !Ref ReportsBucket
+
+          DB_HOST_PARAMETER:
+            !Ref DbHostParameterName
+
+          DB_PORT_PARAMETER:
+            !Ref DbPortParameterName
+
+          DB_NAME_PARAMETER:
+            !Ref DbNameParameterName
+
+          DB_USERNAME_PARAMETER:
+            !Ref DbUsernameParameterName
+
+          DB_PASSWORD_PARAMETER:
+            !Ref DbPasswordParameterName
+
+
+      Tags:
+
+        - Key: Project
+          Value: CloudMart
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # ============================================================
+  # EVENTBRIDGE DAILY SCHEDULE
+  # ============================================================
+
+  DailyReportSchedule:
+    Type: AWS::Events::Rule
+
+    Properties:
+
+      Name:
+        !Sub CloudMart-${Environment}-DailyReport
+
+      Description:
+        !Sub Daily CloudMart report generation for ${Environment}
+
+      # 03:00 UTC = 08:30 IST
+      ScheduleExpression:
+        cron(0 3 * * ? *)
+
+      State: ENABLED
+
+      Targets:
+
+        - Arn:
+            !GetAtt ReportGeneratorLambda.Arn
+
+          Id:
+            ReportGeneratorTarget
+
+
+  # ============================================================
+  # ALLOW EVENTBRIDGE TO INVOKE LAMBDA
+  # ============================================================
+
+  ReportLambdaPermission:
+    Type: AWS::Lambda::Permission
+
+    Properties:
+
+      FunctionName:
+        !Ref ReportGeneratorLambda
+
+      Action:
+        lambda:InvokeFunction
+
+      Principal:
+        events.amazonaws.com
+
+      SourceArn:
+        !GetAtt DailyReportSchedule.Arn
+
+
+# ==============================================================
+# OUTPUTS
+# ==============================================================
+
+Outputs:
+
+  ReportsBucketName:
+
+    Description:
+      CloudMart reports S3 bucket
+
+    Value:
+      !Ref ReportsBucket
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-ReportsBucketName
+
+
+  ReportsBucketArn:
+
+    Description:
+      CloudMart reports S3 bucket ARN
+
+    Value:
+      !GetAtt ReportsBucket.Arn
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-ReportsBucketArn
+
+
+  ReportLambdaName:
+
+    Description:
+      CloudMart Report Generator Lambda
+
+    Value:
+      !Ref ReportGeneratorLambda
+
+
+  ReportLambdaArn:
+
+    Description:
+      CloudMart Report Generator Lambda ARN
+
+    Value:
+      !GetAtt ReportGeneratorLambda.Arn
+
+
+  DailyReportRuleArn:
+
+    Description:
+      Daily report EventBridge rule ARN
+
+    Value:
+      !GetAtt DailyReportSchedule.Arn
