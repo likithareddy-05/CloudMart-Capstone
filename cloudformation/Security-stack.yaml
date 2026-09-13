@@ -459,6 +459,19 @@ Resources:
                 Resource:
                   !Sub arn:${AWS::Partition}:s3:::cloudmart-${Environment}-reports-${AWS::AccountId}/*
 
+              # -------------------------------------------
+              # Publish CloudWatch custom metrics
+              # -------------------------------------------
+
+              - Sid: PublishCustomMetrics
+
+                Effect: Allow
+
+                Action:
+                  - cloudwatch:PutMetricData
+
+                Resource: '*'
+
 
 # =========================================================
 # OUTPUTS
