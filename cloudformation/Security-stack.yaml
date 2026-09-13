@@ -45,71 +45,7 @@ Resources:
 
 
   # =======================================================
-  # 1. AUTHORIZER LAMBDA ROLE
-  # =======================================================
-
-  AuthorizerLambdaRole:
-    Type: AWS::IAM::Role
-
-    Properties:
-
-      RoleName:
-        !Sub CloudMart-${Environment}-AuthorizerLambdaRole
-
-      Description:
-        IAM execution role for CloudMart Lambda Authorizer
-
-      AssumeRolePolicyDocument:
-
-        Version: '2012-10-17'
-
-        Statement:
-
-          - Effect: Allow
-
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-
-            Action:
-              - sts:AssumeRole
-
-
-      ManagedPolicyArns:
-
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-
-
-      Policies:
-
-        - PolicyName:
-            !Sub CloudMart-${Environment}-AuthorizerSSMAccess
-
-          PolicyDocument:
-
-            Version: '2012-10-17'
-
-            Statement:
-
-              # -------------------------------------------
-              # Read authentication token from SSM
-              # -------------------------------------------
-
-              - Sid: ReadAuthToken
-
-                Effect: Allow
-
-                Action:
-                  - ssm:GetParameter
-
-                Resource:
-                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudmart/${Environment}/auth/user-token
-
-                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudmart/${Environment}/auth/admin-token
-
-
-  # =======================================================
-  # 2. PRODUCT LAMBDA ROLE
+  # 1. PRODUCT LAMBDA ROLE
   # =======================================================
 
   ProductLambdaRole:
@@ -186,7 +122,7 @@ Resources:
 
 
   # =======================================================
-  # 3. ORDER LAMBDA ROLE
+  # 2. ORDER LAMBDA ROLE
   # =======================================================
 
   OrderLambdaRole:
@@ -277,7 +213,7 @@ Resources:
 
 
   # =======================================================
-  # 4. INVENTORY ALERT LAMBDA ROLE
+  # 3. INVENTORY ALERT LAMBDA ROLE
   # =======================================================
 
   InventoryAlertLambdaRole:
@@ -368,7 +304,7 @@ Resources:
 
 
   # =======================================================
-  # 5. REPORT GENERATOR LAMBDA ROLE
+  # 4. REPORT GENERATOR LAMBDA ROLE
   # =======================================================
 
   ReportGeneratorLambdaRole:
@@ -478,23 +414,6 @@ Resources:
 # =========================================================
 
 Outputs:
-
-
-  # =======================================================
-  # AUTHORIZER ROLE
-  # =======================================================
-
-  AuthorizerLambdaRoleArn:
-
-    Description:
-      ARN of the CloudMart Authorizer Lambda IAM role
-
-    Value:
-      !GetAtt AuthorizerLambdaRole.Arn
-
-    Export:
-      Name:
-        !Sub CloudMart-${Environment}-AuthorizerLambdaRoleArn
 
 
   # =======================================================
