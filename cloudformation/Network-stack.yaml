@@ -510,10 +510,10 @@ Resources:
 
         - !Ref VpcEndpointSecurityGroup
 
-    Tags:
+      Tags:
 
-      - Key: Name
-        Value: !Sub cloudmart-${Environment}-cloudwatch-monitoring-endpoint
+        - Key: Name
+          Value: !Sub cloudmart-${Environment}-cloudwatch-monitoring-endpoint
 
   # =========================================================
   # EVENTBRIDGE VPC INTERFACE ENDPOINT
