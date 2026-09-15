@@ -1,0 +1,145 @@
+name: Deploy Monitoring Stack
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ap-south-1
+  STACK_NAME: cloudmart-dev-monitoring
+  TEMPLATE_FILE: cloudformation/monitoring-stack.yaml
+  ENVIRONMENT: dev
+
+jobs:
+
+  deploy-monitoring:
+    name: Deploy CloudMart Monitoring Stack
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # =========================================================
+      # CHECKOUT CODE
+      # =========================================================
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # =========================================================
+      # CONFIGURE AWS CREDENTIALS
+      # =========================================================
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+
+      # =========================================================
+      # VERIFY TEMPLATE EXISTS
+      # =========================================================
+
+      - name: Verify monitoring template
+        run: |
+          echo "Checking monitoring CloudFormation template..."
+
+          test -f "${TEMPLATE_FILE}"
+
+          echo "Template found:"
+          ls -lh "${TEMPLATE_FILE}"
+
+
+      # =========================================================
+      # VALIDATE CLOUDFORMATION TEMPLATE
+      # =========================================================
+
+      - name: Validate CloudFormation template
+        run: |
+          echo "Validating CloudFormation template..."
+
+          aws cloudformation validate-template \
+            --template-body file://"${TEMPLATE_FILE}"
+
+          echo "CloudFormation template validation successful."
+
+
+      # =========================================================
+      # CHECK WHETHER STACK ALREADY EXISTS
+      # =========================================================
+
+      - name: Check existing monitoring stack
+        id: check-stack
+        run: |
+
+          if aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            >/dev/null 2>&1
+          then
+
+            echo "Stack already exists."
+            echo "stack_exists=true" >> "$GITHUB_OUTPUT"
+
+          else
+
+            echo "Monitoring stack does not exist."
+            echo "stack_exists=false" >> "$GITHUB_OUTPUT"
+
+          fi
+
+
+      # =========================================================
+      # CREATE / UPDATE MONITORING STACK
+      # =========================================================
+
+      - name: Deploy monitoring stack
+        run: |
+
+          echo "Deploying CloudMart Monitoring Stack..."
+
+          aws cloudformation deploy \
+            --stack-name "${STACK_NAME}" \
+            --template-file "${TEMPLATE_FILE}" \
+            --parameter-overrides \
+              Environment="${ENVIRONMENT}" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "${AWS_REGION}"
+
+          echo "Monitoring stack deployment completed."
+
+
+      # =========================================================
+      # SHOW STACK STATUS
+      # =========================================================
+
+      - name: Verify stack deployment
+        run: |
+
+          echo "Checking final CloudFormation stack status..."
+
+          aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query 'Stacks[0].StackStatus' \
+            --output text
+
+
+      # =========================================================
+      # SHOW STACK OUTPUTS
+      # =========================================================
+
+      - name: Display stack outputs
+        run: |
+
+          echo "CloudMart Monitoring Stack outputs:"
+
+          aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --region "${AWS_REGION}" \
+            --query 'Stacks[0].Outputs' \
+            --output table

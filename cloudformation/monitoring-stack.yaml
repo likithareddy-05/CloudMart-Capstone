@@ -1,0 +1,644 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Description: >
+  CloudMart Monitoring Stack.
+  Creates the CloudWatch operations dashboard,
+  CloudWatch alarms and monitoring SNS notification topic.
+  Existing application resources and custom CloudWatch
+  metrics are reused.
+
+
+# =========================================================
+# PARAMETERS
+# =========================================================
+
+Parameters:
+
+  Environment:
+    Type: String
+    Default: dev
+
+    AllowedValues:
+      - dev
+      - test
+      - prod
+
+    Description:
+      CloudMart deployment environment
+
+
+  NotificationEmail:
+    Type: String
+
+    Description:
+      Email address that receives CloudMart monitoring alerts
+
+
+# =========================================================
+# RESOURCES
+# =========================================================
+
+Resources:
+
+
+  # =======================================================
+  # MONITORING SNS TOPIC
+  # =======================================================
+
+  MonitoringSNSTopic:
+    Type: AWS::SNS::Topic
+
+    Properties:
+
+      TopicName:
+        !Sub CloudMart-${Environment}-Monitoring
+
+      DisplayName:
+        !Sub CloudMart-${Environment}-Monitoring
+
+      Tags:
+
+        - Key: Project
+          Value: CloudMart
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # =======================================================
+  # MONITORING EMAIL SUBSCRIPTION
+  # =======================================================
+
+  MonitoringEmailSubscription:
+    Type: AWS::SNS::Subscription
+
+    Properties:
+
+      TopicArn:
+        !Ref MonitoringSNSTopic
+
+      Protocol: email
+
+      Endpoint:
+        !Ref NotificationEmail
+
+
+  # =======================================================
+  # ORDERS FAILED ALARM
+  # =======================================================
+
+  OrdersFailedAlarm:
+    Type: AWS::CloudWatch::Alarm
+
+    Properties:
+
+      AlarmName:
+        !Sub CloudMart-${Environment}-OrdersFailed
+
+      AlarmDescription:
+        !Sub >
+          CloudMart ${Environment}: one or more orders
+          failed.
+
+      Namespace:
+        CloudMart
+
+      MetricName:
+        OrdersFailed
+
+      Statistic:
+        Sum
+
+      Period:
+        300
+
+      EvaluationPeriods:
+        1
+
+      DatapointsToAlarm:
+        1
+
+      Threshold:
+        1
+
+      ComparisonOperator:
+        GreaterThanOrEqualToThreshold
+
+      TreatMissingData:
+        notBreaching
+
+      AlarmActions:
+        - !Ref MonitoringSNSTopic
+
+      Tags:
+
+        - Key: Project
+          Value: CloudMart
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # =======================================================
+  # INVENTORY ALERT ALARM
+  # =======================================================
+
+  InventoryAlertsAlarm:
+    Type: AWS::CloudWatch::Alarm
+
+    Properties:
+
+      AlarmName:
+        !Sub CloudMart-${Environment}-InventoryAlerts
+
+      AlarmDescription:
+        !Sub >
+          CloudMart ${Environment}: a low-stock inventory
+          alert was generated.
+
+      Namespace:
+        CloudMart
+
+      MetricName:
+        InventoryAlerts
+
+      Statistic:
+        Sum
+
+      Period:
+        300
+
+      EvaluationPeriods:
+        1
+
+      DatapointsToAlarm:
+        1
+
+      Threshold:
+        1
+
+      ComparisonOperator:
+        GreaterThanOrEqualToThreshold
+
+      TreatMissingData:
+        notBreaching
+
+      AlarmActions:
+        - !Ref MonitoringSNSTopic
+
+      Tags:
+
+        - Key: Project
+          Value: CloudMart
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # =======================================================
+  # ORDER LAMBDA ERROR ALARM
+  # =======================================================
+
+  OrderLambdaErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+
+    Properties:
+
+      AlarmName:
+        !Sub CloudMart-${Environment}-OrderLambdaErrors
+
+      AlarmDescription:
+        !Sub >
+          CloudMart ${Environment}: Order Lambda errors
+          detected.
+
+      Namespace:
+        AWS/Lambda
+
+      MetricName:
+        Errors
+
+      Dimensions:
+
+        - Name: FunctionName
+          Value:
+            !Sub CloudMart-${Environment}-OrderLambda
+
+      Statistic:
+        Sum
+
+      Period:
+        300
+
+      EvaluationPeriods:
+        1
+
+      DatapointsToAlarm:
+        1
+
+      Threshold:
+        1
+
+      ComparisonOperator:
+        GreaterThanOrEqualToThreshold
+
+      TreatMissingData:
+        notBreaching
+
+      AlarmActions:
+        - !Ref MonitoringSNSTopic
+
+      Tags:
+
+        - Key: Project
+          Value: CloudMart
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # =======================================================
+  # REPORT GENERATOR ERROR ALARM
+  # =======================================================
+
+  ReportGeneratorErrorsAlarm:
+    Type: AWS::CloudWatch::Alarm
+
+    Properties:
+
+      AlarmName:
+        !Sub CloudMart-${Environment}-ReportGeneratorErrors
+
+      AlarmDescription:
+        !Sub >
+          CloudMart ${Environment}: Report Generator Lambda
+          errors detected.
+
+      Namespace:
+        AWS/Lambda
+
+      MetricName:
+        Errors
+
+      Dimensions:
+
+        - Name: FunctionName
+          Value:
+            !Sub CloudMart-${Environment}-ReportGenerator
+
+      Statistic:
+        Sum
+
+      Period:
+        300
+
+      EvaluationPeriods:
+        1
+
+      DatapointsToAlarm:
+        1
+
+      Threshold:
+        1
+
+      ComparisonOperator:
+        GreaterThanOrEqualToThreshold
+
+      TreatMissingData:
+        notBreaching
+
+      AlarmActions:
+        - !Ref MonitoringSNSTopic
+
+      Tags:
+
+        - Key: Project
+          Value: CloudMart
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # =======================================================
+  # RDS CPU ALARM
+  # =======================================================
+
+  RdsCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+
+    Properties:
+
+      AlarmName:
+        !Sub CloudMart-${Environment}-RDS-HighCPU
+
+      AlarmDescription:
+        !Sub >
+          CloudMart ${Environment}: RDS CPU utilization
+          is above 80 percent.
+
+      Namespace:
+        AWS/RDS
+
+      MetricName:
+        CPUUtilization
+
+      Dimensions:
+
+        - Name: DBInstanceIdentifier
+          Value:
+            !Sub cloudmart-${Environment}-db
+
+      Statistic:
+        Average
+
+      Period:
+        300
+
+      EvaluationPeriods:
+        2
+
+      DatapointsToAlarm:
+        2
+
+      Threshold:
+        80
+
+      ComparisonOperator:
+        GreaterThanOrEqualToThreshold
+
+      TreatMissingData:
+        notBreaching
+
+      AlarmActions:
+        - !Ref MonitoringSNSTopic
+
+      Tags:
+
+        - Key: Project
+          Value: CloudMart
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # =======================================================
+  # CLOUDWATCH OPERATIONS DASHBOARD
+  # =======================================================
+
+  OperationsDashboard:
+    Type: AWS::CloudWatch::Dashboard
+
+    Properties:
+
+      DashboardName:
+        !Sub cloudmart-operations
+
+      DashboardBody:
+        !Sub |
+          {
+            "widgets": [
+
+              {
+                "type": "metric",
+                "x": 0,
+                "y": 0,
+                "width": 12,
+                "height": 6,
+                "properties": {
+                  "title": "CloudMart Orders",
+                  "view": "timeSeries",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "stat": "Sum",
+                  "metrics": [
+                    [
+                      "CloudMart",
+                      "OrdersPlaced"
+                    ],
+                    [
+                      ".",
+                      "OrdersFailed"
+                    ],
+                    [
+                      ".",
+                      "OrdersCancelled"
+                    ]
+                  ]
+                }
+              },
+
+              {
+                "type": "metric",
+                "x": 12,
+                "y": 0,
+                "width": 12,
+                "height": 6,
+                "properties": {
+                  "title": "CloudMart Inventory",
+                  "view": "timeSeries",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "stat": "Sum",
+                  "metrics": [
+                    [
+                      "CloudMart",
+                      "LowStockEvents"
+                    ],
+                    [
+                      ".",
+                      "InventoryAlerts"
+                    ]
+                  ]
+                }
+              },
+
+              {
+                "type": "metric",
+                "x": 0,
+                "y": 6,
+                "width": 12,
+                "height": 6,
+                "properties": {
+                  "title": "Reports Generated",
+                  "view": "timeSeries",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "stat": "Sum",
+                  "metrics": [
+                    [
+                      "CloudMart",
+                      "ReportsGenerated"
+                    ]
+                  ]
+                }
+              },
+
+              {
+                "type": "metric",
+                "x": 12,
+                "y": 6,
+                "width": 12,
+                "height": 6,
+                "properties": {
+                  "title": "Lambda Errors",
+                  "view": "timeSeries",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "stat": "Sum",
+                  "metrics": [
+                    [
+                      "AWS/Lambda",
+                      "Errors",
+                      "FunctionName",
+                      "CloudMart-${Environment}-OrderLambda"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-ReportGenerator"
+                    ]
+                  ]
+                }
+              },
+
+              {
+                "type": "metric",
+                "x": 0,
+                "y": 12,
+                "width": 12,
+                "height": 6,
+                "properties": {
+                  "title": "Lambda Duration",
+                  "view": "timeSeries",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "stat": "Average",
+                  "metrics": [
+                    [
+                      "AWS/Lambda",
+                      "Duration",
+                      "FunctionName",
+                      "CloudMart-${Environment}-OrderLambda"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-ReportGenerator"
+                    ]
+                  ]
+                }
+              },
+
+              {
+                "type": "metric",
+                "x": 12,
+                "y": 12,
+                "width": 12,
+                "height": 6,
+                "properties": {
+                  "title": "RDS CPU Utilization",
+                  "view": "timeSeries",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "stat": "Average",
+                  "metrics": [
+                    [
+                      "AWS/RDS",
+                      "CPUUtilization",
+                      "DBInstanceIdentifier",
+                      "cloudmart-${Environment}-db"
+                    ]
+                  ]
+                }
+              },
+
+              {
+                "type": "metric",
+                "x": 0,
+                "y": 18,
+                "width": 12,
+                "height": 6,
+                "properties": {
+                  "title": "RDS Database Connections",
+                  "view": "timeSeries",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "stat": "Average",
+                  "metrics": [
+                    [
+                      "AWS/RDS",
+                      "DatabaseConnections",
+                      "DBInstanceIdentifier",
+                      "cloudmart-${Environment}-db"
+                    ]
+                  ]
+                }
+              }
+
+            ]
+          }
+
+
+# =========================================================
+# OUTPUTS
+# =========================================================
+
+Outputs:
+
+
+  MonitoringSNSTopicArn:
+    Description:
+      CloudMart monitoring SNS topic ARN
+
+    Value:
+      !Ref MonitoringSNSTopic
+
+
+  MonitoringDashboardName:
+    Description:
+      CloudMart operations CloudWatch dashboard
+
+    Value:
+      !Sub cloudmart-operations
+
+
+  OrdersFailedAlarmArn:
+    Description:
+      Orders failed CloudWatch alarm
+
+    Value:
+      !GetAtt OrdersFailedAlarm.Arn
+
+
+  InventoryAlertsAlarmArn:
+    Description:
+      Inventory alerts CloudWatch alarm
+
+    Value:
+      !GetAtt InventoryAlertsAlarm.Arn
+
+
+  OrderLambdaErrorsAlarmArn:
+    Description:
+      Order Lambda errors CloudWatch alarm
+
+    Value:
+      !GetAtt OrderLambdaErrorsAlarm.Arn
+
+
+  ReportGeneratorErrorsAlarmArn:
+    Description:
+      Report Generator Lambda errors CloudWatch alarm
+
+    Value:
+      !GetAtt ReportGeneratorErrorsAlarm.Arn
+
+
+  RdsCPUAlarmArn:
+    Description:
+      RDS CPU CloudWatch alarm
+
+    Value:
+      !GetAtt RdsCPUAlarm.Arn
