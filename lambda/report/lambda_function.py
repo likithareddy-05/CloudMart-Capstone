@@ -24,16 +24,20 @@ DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
 
 def get_parameter(name, with_decryption=False):
     print(f"Getting SSM parameter: {name}")
+
     response = ssm.get_parameter(
         Name=name,
         WithDecryption=with_decryption
     )
+
     print(f"Successfully retrieved SSM parameter: {name}")
+
     return response["Parameter"]["Value"]
 
 
 def get_db_connection():
     print("Starting DB connection setup")
+
     db_host = get_parameter(
         DB_HOST_PARAMETER
     )
@@ -61,8 +65,10 @@ def get_db_connection():
         with_decryption=True
     )
     print("Got DB password")
+
     print("Connecting to RDS...")
-    return pymysql.connect(
+
+    connection = pymysql.connect(
         host=db_host,
         port=db_port,
         user=db_username,
@@ -71,9 +77,11 @@ def get_db_connection():
         cursorclass=pymysql.cursors.DictCursor,
         connect_timeout=10
     )
+
     print("RDS connection successful")
 
     return connection
+
 
 def publish_metric(metric_name, value):
     cloudwatch.put_metric_data(
@@ -217,9 +225,20 @@ def generate_report():
         ContentType="text/csv"
     )
 
-    publish_metric("OrdersPlaced", orders_placed)
-    publish_metric("OrdersFailed", orders_failed)
-    publish_metric("LowStockEvents", low_stock_count)
+    publish_metric(
+        "OrdersPlaced",
+        orders_placed
+    )
+
+    publish_metric(
+        "OrdersFailed",
+        orders_failed
+    )
+
+    publish_metric(
+        "LowStockEvents",
+        low_stock_count
+    )
 
     return {
         "bucket": REPORTS_BUCKET,
