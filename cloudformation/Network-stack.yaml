@@ -475,15 +475,19 @@ Resources:
           Value: !Sub cloudmart-${Environment}-ssm-endpoint
 
 
-  # =========================================================
-  # CLOUDWATCH LOGS VPC INTERFACE ENDPOINT
+    # =========================================================
+  # CLOUDWATCH MONITORING VPC INTERFACE ENDPOINT
   # =========================================================
   #
-  # Allows private Lambda functions to send logs
-  # to CloudWatch Logs.
+  # Allows private Lambda functions to publish
+  # custom CloudWatch metrics using PutMetricData.
+  #
+  # Required for:
+  #   cloudwatch.put_metric_data()
+  #
   # =========================================================
 
-  CloudWatchLogsVpcEndpoint:
+  CloudWatchMonitoringVpcEndpoint:
     Type: AWS::EC2::VPCEndpoint
 
     Properties:
@@ -506,11 +510,10 @@ Resources:
 
         - !Ref VpcEndpointSecurityGroup
 
-      Tags:
+    Tags:
 
-        - Key: Name
-          Value: !Sub cloudmart-${Environment}-cloudwatch-monitoring-endpoint
-
+      - Key: Name
+        Value: !Sub cloudmart-${Environment}-cloudwatch-monitoring-endpoint
 
   # =========================================================
   # EVENTBRIDGE VPC INTERFACE ENDPOINT
