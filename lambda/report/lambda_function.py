@@ -98,10 +98,18 @@ def publish_metric(metric_name, value):
 
 def generate_report():
 
+    print("Starting report generation")
+
     connection = get_db_connection()
+
+    print("Database connection obtained")
 
     try:
         with connection.cursor() as cursor:
+
+            print("Database cursor created")
+
+            print("Executing products query")
 
             cursor.execute("""
                 SELECT
@@ -117,7 +125,13 @@ def generate_report():
                 ORDER BY p.product_id
             """)
 
+            print("Products query executed")
+
             products = cursor.fetchall()
+
+            print(f"Products fetched: {len(products)}")
+
+            print("Executing orders query")
 
             cursor.execute("""
                 SELECT
@@ -131,10 +145,18 @@ def generate_report():
                 LIMIT 100
             """)
 
+            print("Orders query executed")
+
             orders = cursor.fetchall()
 
+            print(f"Orders fetched: {len(orders)}")
+
     finally:
+        print("Closing database connection")
         connection.close()
+        print("Database connection closed")
+
+    print("Starting CSV generation")
 
     now = datetime.now(timezone.utc)
 
@@ -214,9 +236,13 @@ def generate_report():
             order["created_at"]
         ])
 
+    print("CSV generation completed")
+
     report_date = now.strftime("%Y-%m-%d")
 
     key = f"reports/daily-report-{report_date}.csv"
+
+    print(f"Uploading report to S3: {key}")
 
     s3.put_object(
         Bucket=REPORTS_BUCKET,
@@ -225,20 +251,30 @@ def generate_report():
         ContentType="text/csv"
     )
 
+    print("Report uploaded to S3")
+
+    print("Publishing OrdersPlaced metric")
+
     publish_metric(
         "OrdersPlaced",
         orders_placed
     )
+
+    print("Publishing OrdersFailed metric")
 
     publish_metric(
         "OrdersFailed",
         orders_failed
     )
 
+    print("Publishing LowStockEvents metric")
+
     publish_metric(
         "LowStockEvents",
         low_stock_count
     )
+
+    print("All CloudWatch metrics published")
 
     return {
         "bucket": REPORTS_BUCKET,
@@ -247,7 +283,6 @@ def generate_report():
         "ordersFailed": orders_failed,
         "lowStockEvents": low_stock_count
     }
-
 
 def lambda_handler(event, context):
 

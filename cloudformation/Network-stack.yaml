@@ -492,7 +492,7 @@ Resources:
         !Ref CloudMartVPC
 
       ServiceName:
-        !Sub com.amazonaws.${AWS::Region}.logs
+        !Sub com.amazonaws.${AWS::Region}.monitoring
 
       VpcEndpointType: Interface
 
@@ -509,7 +509,7 @@ Resources:
       Tags:
 
         - Key: Name
-          Value: !Sub cloudmart-${Environment}-logs-endpoint
+          Value: !Sub cloudmart-${Environment}-cloudwatch-monitoring-endpoint
 
 
   # =========================================================
@@ -749,21 +749,21 @@ Outputs:
         !Sub CloudMart-${Environment}-SsmVpcEndpointId
 
 
-  # =========================================================
-  # CLOUDWATCH LOGS VPC ENDPOINT
+    # =========================================================
+  # CLOUDWATCH MONITORING VPC ENDPOINT
   # =========================================================
 
-  CloudWatchLogsVpcEndpointId:
+  CloudWatchMonitoringVpcEndpointId:
 
     Description:
-      CloudWatch Logs VPC interface endpoint
+      CloudWatch Monitoring VPC interface endpoint
 
     Value:
-      !Ref CloudWatchLogsVpcEndpoint
+      !Ref CloudWatchMonitoringVpcEndpoint
 
     Export:
       Name:
-        !Sub CloudMart-${Environment}-CloudWatchLogsVpcEndpointId
+        !Sub CloudMart-${Environment}-CloudWatchMonitoringVpcEndpointId
 
 
   # =========================================================
