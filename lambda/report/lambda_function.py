@@ -23,39 +23,45 @@ DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
 
 
 def get_parameter(name, with_decryption=False):
+    print(f"Getting SSM parameter: {name}")
     response = ssm.get_parameter(
         Name=name,
         WithDecryption=with_decryption
     )
-
+    print(f"Successfully retrieved SSM parameter: {name}")
     return response["Parameter"]["Value"]
 
 
 def get_db_connection():
-
+    print("Starting DB connection setup")
     db_host = get_parameter(
         DB_HOST_PARAMETER
     )
+    print("Got DB host")
 
     db_port = int(
         get_parameter(
             DB_PORT_PARAMETER
         )
     )
+    print("Got DB port")
 
     db_name = get_parameter(
         DB_NAME_PARAMETER
     )
+    print("Got DB name")
 
     db_username = get_parameter(
         DB_USERNAME_PARAMETER
     )
+    print("Got DB username")
 
     db_password = get_parameter(
         DB_PASSWORD_PARAMETER,
         with_decryption=True
     )
-
+    print("Got DB password")
+    print("Connecting to RDS...")
     return pymysql.connect(
         host=db_host,
         port=db_port,
@@ -65,6 +71,9 @@ def get_db_connection():
         cursorclass=pymysql.cursors.DictCursor,
         connect_timeout=10
     )
+    print("RDS connection successful")
+
+    return connection
 
 def publish_metric(metric_name, value):
     cloudwatch.put_metric_data(
