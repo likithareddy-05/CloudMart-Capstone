@@ -352,6 +352,75 @@ Resources:
 
 
   # =========================================================
+  # EC2 DASHBOARD SECURITY GROUP
+  # =========================================================
+  #
+  # Used by the CloudMart Flask dashboard EC2 instance.
+  #
+  # EC2 Dashboard
+  #      |
+  #      +---- HTTPS 443 ----> AWS services / VPC endpoints
+  #      |
+  #      +---- MySQL 3306 --> RDS
+  #      |
+  #      +---- HTTP 80 -----> Dashboard users
+  # =========================================================
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+
+    Properties:
+
+      GroupDescription:
+        Allow CloudMart dashboard EC2 access to
+        the dashboard, RDS and AWS services.
+
+      VpcId:
+        !Ref CloudMartVPC
+
+      SecurityGroupIngress:
+
+        # -------------------------------------------------
+        # HTTP access to the Flask/Nginx dashboard
+        # -------------------------------------------------
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+      SecurityGroupEgress:
+
+        # -------------------------------------------------
+        # HTTPS access to AWS services / VPC endpoints
+        # -------------------------------------------------
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+        # -------------------------------------------------
+        # MySQL access to primary private subnet
+        # -------------------------------------------------
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 10.0.2.0/24
+
+        # -------------------------------------------------
+        # MySQL access to RDS support private subnet
+        # -------------------------------------------------
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 10.0.3.0/24
+
+      Tags:
+
+        - Key: Name
+          Value: !Sub cloudmart-${Environment}-ec2-dashboard-sg
+
+
+  # =========================================================
   # VPC ENDPOINT SECURITY GROUP
   # =========================================================
   #
@@ -381,12 +450,19 @@ Resources:
         !Ref CloudMartVPC
 
       SecurityGroupIngress:
-
+        # Lambda → VPC endpoints
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
           SourceSecurityGroupId:
             !Ref LambdaSecurityGroup
+
+        # EC2 Dashboard → VPC endpoints
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          SourceSecurityGroupId:
+            !Ref EC2SecurityGroup
 
       SecurityGroupEgress:
 
@@ -419,13 +495,21 @@ Resources:
         !Ref CloudMartVPC
 
       SecurityGroupIngress:
-
+        # Lambda → RDS
         - IpProtocol: tcp
           FromPort: 3306
           ToPort: 3306
 
           SourceSecurityGroupId:
             !Ref LambdaSecurityGroup
+
+        # EC2 Dashboard → RDS
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+
+          SourceSecurityGroupId:
+            !Ref EC2SecurityGroup
 
       SecurityGroupEgress:
 
@@ -753,6 +837,21 @@ Outputs:
       Name:
         !Sub CloudMart-${Environment}-RdsSecurityGroupId
 
+  # =========================================================
+  # EC2 DASHBOARD SECURITY GROUP
+  # =========================================================
+
+  EC2SecurityGroupId:
+
+    Description:
+      Security group used by the CloudMart EC2 dashboard
+
+    Value:
+      !Ref EC2SecurityGroup
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-EC2SecurityGroupId
 
   # =========================================================
   # VPC ENDPOINT SECURITY GROUP
