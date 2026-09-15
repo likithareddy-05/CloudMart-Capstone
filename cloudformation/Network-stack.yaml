@@ -475,7 +475,43 @@ Resources:
           Value: !Sub cloudmart-${Environment}-ssm-endpoint
 
 
-    # =========================================================
+  # =========================================================
+  # CLOUDWATCH LOGS VPC INTERFACE ENDPOINT
+  # =========================================================
+  #
+  # Allows private Lambda functions to send logs
+  # to CloudWatch Logs.
+  # =========================================================
+
+  CloudWatchLogsVpcEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+
+    Properties:
+
+      VpcId:
+        !Ref CloudMartVPC
+
+      ServiceName:
+        !Sub com.amazonaws.${AWS::Region}.logs
+
+      VpcEndpointType: Interface
+
+      PrivateDnsEnabled: true
+
+      SubnetIds:
+
+        - !Ref PrivateSubnet
+
+      SecurityGroupIds:
+
+        - !Ref VpcEndpointSecurityGroup
+
+      Tags:
+
+        - Key: Name
+          Value: !Sub cloudmart-${Environment}-logs-endpoint
+
+  # =========================================================
   # CLOUDWATCH MONITORING VPC INTERFACE ENDPOINT
   # =========================================================
   #
@@ -752,7 +788,7 @@ Outputs:
         !Sub CloudMart-${Environment}-SsmVpcEndpointId
 
 
-    # =========================================================
+  # =========================================================
   # CLOUDWATCH MONITORING VPC ENDPOINT
   # =========================================================
 
@@ -767,6 +803,23 @@ Outputs:
     Export:
       Name:
         !Sub CloudMart-${Environment}-CloudWatchMonitoringVpcEndpointId
+
+
+  # =========================================================
+  # CLOUDWATCH LOGS VPC ENDPOINT
+  # =========================================================
+
+  CloudWatchLogsVpcEndpointId:
+
+    Description:
+      CloudWatch Logs VPC interface endpoint
+
+    Value:
+      !Ref CloudWatchLogsVpcEndpoint
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-CloudWatchLogsVpcEndpointId
 
 
   # =========================================================
