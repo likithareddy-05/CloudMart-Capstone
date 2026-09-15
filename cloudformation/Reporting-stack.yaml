@@ -31,7 +31,6 @@ Parameters:
     Description:
       EC2 instance type for the CloudMart dashboard
 
-
   LatestAmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
 
@@ -41,13 +40,11 @@ Parameters:
     Description:
       Latest Amazon Linux 2023 AMI
 
-
   LambdaS3Bucket:
     Type: String
 
     Description:
       Existing S3 bucket containing packaged Lambda code
-
 
   LambdaS3Key:
     Type: String
@@ -55,13 +52,11 @@ Parameters:
     Description:
       S3 key for the reporting Lambda package
 
-
   ReportsBucketName:
     Type: String
 
     Description:
       Existing S3 bucket used to store CloudMart reports
-
 
   DbHostParameterName:
     Type: String
@@ -71,7 +66,6 @@ Parameters:
     Description:
       SSM parameter containing the RDS MySQL host
 
-
   DbPortParameterName:
     Type: String
 
@@ -79,7 +73,6 @@ Parameters:
 
     Description:
       SSM parameter containing the RDS MySQL port
-
 
   DbNameParameterName:
     Type: String
@@ -89,7 +82,6 @@ Parameters:
     Description:
       SSM parameter containing the database name
 
-
   DbUsernameParameterName:
     Type: String
 
@@ -97,7 +89,6 @@ Parameters:
 
     Description:
       SSM parameter containing the database username
-
 
   DbPasswordParameterName:
     Type: String
@@ -238,9 +229,7 @@ Resources:
       ScheduleExpression:
         cron(0 3 * * ? *)
 
-
       State: ENABLED
-
 
       Targets:
 
@@ -273,7 +262,7 @@ Resources:
         !GetAtt DailyReportSchedule.Arn
 
 
-    # ============================================================
+  # ============================================================
   # EC2 FLASK DASHBOARD
   # ============================================================
 
@@ -551,12 +540,12 @@ Resources:
                         cursor.execute(
                             """
                             SELECT
-                            p.product_id AS id,
-                            p.name,
-                            p.description,
-                            p.price,
-                            p.category,
-                            i.stock_count
+                                p.product_id AS id,
+                                p.name,
+                                p.description,
+                                p.price,
+                                p.category,
+                                i.stock_count
                             FROM products p
                             INNER JOIN inventory i
                                 ON p.product_id = i.product_id
@@ -590,24 +579,23 @@ Resources:
                         cursor.execute(
                             """
                             SELECT
-                                o.id AS order_id,
+                                o.order_id AS order_id,
                                 o.customer_id,
                                 o.status,
                                 o.created_at,
                                 oi.product_id,
                                 p.name AS product_name,
                                 oi.quantity,
-                                oi.price
+                                oi.unit_price AS price
                             FROM orders o
                             INNER JOIN order_items oi
-                                ON o.id = oi.order_id
+                                ON o.order_id = oi.order_id
                             INNER JOIN products p
-                                ON oi.product_id = p.id
-                            WHERE o.is_deleted = FALSE
-                              AND oi.is_deleted = FALSE
+                                ON oi.product_id = p.product_id
+                            WHERE p.is_deleted = FALSE
                             ORDER BY
                                 o.created_at DESC,
-                                oi.id DESC
+                                oi.order_item_id DESC
                             LIMIT 20
                             """
                         )
@@ -896,6 +884,7 @@ Resources:
                             Open Latest Report
 
                         </a>
+
 
                     {% else %}
 
@@ -1236,7 +1225,7 @@ Outputs:
       !GetAtt DailyReportSchedule.Arn
 
 
-    # ============================================================
+  # ============================================================
   # DASHBOARD INSTANCE
   # ============================================================
 
