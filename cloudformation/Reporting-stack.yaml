@@ -551,15 +551,17 @@ Resources:
                         cursor.execute(
                             """
                             SELECT
-                                id,
-                                name,
-                                description,
-                                price,
-                                category,
-                                stock_count
-                            FROM products
-                            WHERE is_deleted = FALSE
-                            ORDER BY id
+                            p.product_id AS id,
+                            p.name,
+                            p.description,
+                            p.price,
+                            p.category,
+                            i.stock_count
+                            FROM products p
+                            INNER JOIN inventory i
+                                ON p.product_id = i.product_id
+                            WHERE p.is_deleted = FALSE
+                            ORDER BY p.product_id
                             """
                         )
 
