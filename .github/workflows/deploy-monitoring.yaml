@@ -107,6 +107,7 @@ jobs:
             --template-file "${TEMPLATE_FILE}" \
             --parameter-overrides \
               Environment="${ENVIRONMENT}" \
+              NotificationEmail="${{ secrets.MONITORING_EMAIL }}"
             --capabilities CAPABILITY_NAMED_IAM \
             --region "${AWS_REGION}"
 
