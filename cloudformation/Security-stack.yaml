@@ -408,6 +408,106 @@ Resources:
 
                 Resource: '*'
 
+  # =======================================================
+  # 5. EC2 DASHBOARD IAM ROLE
+  # =======================================================
+
+  DashboardInstanceRole:
+    Type: AWS::IAM::Role
+
+    Properties:
+
+      RoleName:
+        !Sub CloudMart-${Environment}-DashboardInstanceRole
+
+      Description:
+        IAM role for CloudMart EC2 dashboard
+
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+
+        Statement:
+          - Effect: Allow
+
+            Principal:
+              Service:
+                - ec2.amazonaws.com
+
+            Action:
+              - sts:AssumeRole
+
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+      Policies:
+
+        - PolicyName:
+            !Sub CloudMart-${Environment}-DashboardAccess
+
+          PolicyDocument:
+            Version: '2012-10-17'
+
+            Statement:
+
+              # -------------------------------------------
+              # Read database configuration from SSM
+              # -------------------------------------------
+
+              - Sid: ReadDatabaseParameters
+
+                Effect: Allow
+
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/cloudmart/${Environment}/db/*
+
+              # -------------------------------------------
+              # Read generated reports from S3
+              # -------------------------------------------
+
+              - Sid: ReadReports
+
+                Effect: Allow
+
+                Action:
+                  - s3:GetObject
+
+                Resource:
+                  !Sub arn:${AWS::Partition}:s3:::cloudmart-${Environment}-reports-${AWS::AccountId}/*
+
+              # -------------------------------------------
+              # List report bucket
+              # -------------------------------------------
+
+              - Sid: ListReportsBucket
+
+                Effect: Allow
+
+                Action:
+                  - s3:ListBucket
+
+                Resource:
+                  !Sub arn:${AWS::Partition}:s3:::cloudmart-${Environment}-reports-${AWS::AccountId}
+
+
+  # =======================================================
+  # 6. EC2 DASHBOARD INSTANCE PROFILE
+  # =======================================================
+
+  DashboardInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+
+    Properties:
+
+      InstanceProfileName:
+        !Sub CloudMart-${Environment}-DashboardInstanceProfile
+
+      Roles:
+        - !Ref DashboardInstanceRole
+
 
 # =========================================================
 # OUTPUTS
@@ -482,3 +582,37 @@ Outputs:
     Export:
       Name:
         !Sub CloudMart-${Environment}-ReportGeneratorLambdaRoleArn
+
+
+    # =======================================================
+  # EC2 DASHBOARD ROLE
+  # =======================================================
+
+  DashboardInstanceRoleArn:
+
+    Description:
+      ARN of the CloudMart EC2 dashboard IAM role
+
+    Value:
+      !GetAtt DashboardInstanceRole.Arn
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-DashboardInstanceRoleArn
+
+
+  # =======================================================
+  # EC2 DASHBOARD INSTANCE PROFILE
+  # =======================================================
+
+  DashboardInstanceProfileName:
+
+    Description:
+      IAM instance profile used by the CloudMart EC2 dashboard
+
+    Value:
+      !Ref DashboardInstanceProfile
+
+    Export:
+      Name:
+        !Sub CloudMart-${Environment}-DashboardInstanceProfileName
