@@ -253,6 +253,23 @@ def generate_report():
 
     print("Report uploaded to S3")
 
+
+    # =====================================================
+    # PUBLISH REPORTS GENERATED METRIC
+    # =====================================================
+
+    print("Publishing ReportsGenerated metric")
+
+    publish_metric(
+        "ReportsGenerated",
+        1
+    )
+
+
+    # =====================================================
+    # PUBLISH EXISTING METRICS
+    # =====================================================
+
     print("Publishing OrdersPlaced metric")
 
     publish_metric(
@@ -283,6 +300,7 @@ def generate_report():
         "ordersFailed": orders_failed,
         "lowStockEvents": low_stock_count
     }
+
 
 def lambda_handler(event, context):
 

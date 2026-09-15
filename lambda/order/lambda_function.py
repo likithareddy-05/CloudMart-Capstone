@@ -11,6 +11,7 @@ import pymysql
 
 ssm = boto3.client("ssm")
 events_client = boto3.client("events")
+cloudwatch = boto3.client("cloudwatch")
 
 
 # =========================================================
@@ -1724,6 +1725,39 @@ def cancel_order(
             # COMMIT TRANSACTION
             # =============================================
             connection.commit()
+
+            # =================================================
+            # PUBLISH ORDERS CANCELLED METRIC
+            # =================================================
+            try:
+
+                cloudwatch.put_metric_data(
+                    Namespace="CloudMart",
+                    MetricData=[
+                        {
+                            "MetricName": "OrdersCancelled",
+                            "Value": 1,
+                            "Unit": "Count"
+                        }
+                    ]
+                )
+
+                print(json.dumps({
+                    "event": "orders_cancelled_metric_published",
+                    "order_id": order_id
+                }))
+
+            except Exception as metric_error:
+
+                print(json.dumps({
+                    "event": "orders_cancelled_metric_error",
+                    "order_id": order_id,
+                    "error": str(metric_error)
+                }))
+
+
+
+        
 
         # =================================================
         # LOG SUCCESS

@@ -8,6 +8,7 @@ import boto3
 # =========================================================
 
 sns = boto3.client("sns")
+cloudwatch = boto3.client("cloudwatch")
 
 
 # =========================================================
@@ -138,6 +139,61 @@ def lambda_handler(event, context):
 
                 Message=message
             )
+
+
+            # =============================================
+            # PUBLISH INVENTORY ALERT METRIC
+            # =============================================
+
+            try:
+
+                cloudwatch.put_metric_data(
+
+                    Namespace="CloudMart",
+
+                    MetricData=[
+
+                        {
+                            "MetricName":
+                                "InventoryAlerts",
+
+                            "Value":
+                                1,
+
+                            "Unit":
+                                "Count"
+                        }
+
+                    ]
+                )
+
+
+                log_event(
+
+                    "inventory_alert_metric_published",
+
+                    product_id=product_id,
+
+                    product_name=product_name,
+
+                    status="success"
+                )
+
+
+            except Exception as metric_error:
+
+                log_event(
+
+                    "inventory_alert_metric_failed",
+
+                    product_id=product_id,
+
+                    product_name=product_name,
+
+                    error=str(metric_error),
+
+                    status="failed"
+                )
 
 
             # =============================================
