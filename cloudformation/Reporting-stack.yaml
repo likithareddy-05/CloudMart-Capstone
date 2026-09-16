@@ -339,204 +339,102 @@ Resources:
 
       UserData:
         Fn::Base64: !Sub |
-            #!/bin/bash
             set -e
-
             exec > >(tee /var/log/cloudmart-userdata.log | logger -t cloudmart-userdata -s 2>/dev/console) 2>&1
-
-
             echo "===================================================="
             echo "CloudMart Dashboard UserData started"
             echo "===================================================="
-
-
-            # ==================================================
-            # SYSTEM UPDATE
-            # ==================================================
-
             dnf update -y
-
-
-            # ==================================================
-            # INSTALL REQUIRED PACKAGES
-            # ==================================================
-
             dnf install -y \
               python3 \
               python3-pip \
               nginx \
               amazon-ssm-agent
-
-
-            # ==================================================
-            # START SSM AGENT
-            # ==================================================
-
             systemctl enable amazon-ssm-agent
             systemctl start amazon-ssm-agent
-
-
-            # ==================================================
-            # CREATE DASHBOARD DIRECTORY
-            # ==================================================
-
             mkdir -p /opt/cloudmart-dashboard
             mkdir -p /opt/cloudmart-dashboard/templates
-
-
-            # ==================================================
-            # CREATE FLASK APPLICATION
-            # ==================================================
-
             cat > /opt/cloudmart-dashboard/app.py <<'PYTHON'
-
             import logging
             import os
             from datetime import datetime
-
             import boto3
             import pymysql
-
             from flask import Flask, render_template
-
-
             app = Flask(__name__)
-
             logging.basicConfig(level=logging.INFO)
-
-
             ENVIRONMENT = os.environ.get(
                 "ENVIRONMENT",
                 "dev"
             )
-
-
             AWS_REGION = os.environ.get(
                 "AWS_REGION",
                 "ap-south-1"
             )
-
-
             REPORTS_BUCKET = os.environ.get(
                 "REPORTS_BUCKET"
             )
-
-
-            # --------------------------------------------------
-            # ACTUAL CLOUDMART SSM PATHS
-            # --------------------------------------------------
-
             DB_HOST_PARAMETER = (
                 f"/cloudmart/{ENVIRONMENT}/db/host"
             )
-
             DB_PORT_PARAMETER = (
                 f"/cloudmart/{ENVIRONMENT}/db/port"
             )
-
             DB_NAME_PARAMETER = (
                 f"/cloudmart/{ENVIRONMENT}/db/name"
             )
-
             DB_USERNAME_PARAMETER = (
                 f"/cloudmart/{ENVIRONMENT}/db/username"
             )
-
             DB_PASSWORD_PARAMETER = (
                 f"/cloudmart/{ENVIRONMENT}/db/password"
             )
-
-
-            # --------------------------------------------------
-            # AWS CLIENTS
-            # --------------------------------------------------
-
             ssm = boto3.client(
                 "ssm",
                 region_name=AWS_REGION
             )
-
-
             s3 = boto3.client(
                 "s3",
                 region_name=AWS_REGION
             )
-
-
-            # --------------------------------------------------
-            # GET SSM PARAMETER
-            # --------------------------------------------------
-
             def get_parameter(name):
-
                 result = ssm.get_parameter(
                     Name=name,
                     WithDecryption=True
                 )
-
                 return result["Parameter"]["Value"]
-
-
-            # --------------------------------------------------
-            # DATABASE CONNECTION
-            # --------------------------------------------------
-
             def get_db_connection():
-
                 host = get_parameter(
                     DB_HOST_PARAMETER
                 )
-
                 port = int(
                     get_parameter(
                         DB_PORT_PARAMETER
                     )
                 )
-
                 database = get_parameter(
                     DB_NAME_PARAMETER
                 )
-
                 username = get_parameter(
                     DB_USERNAME_PARAMETER
                 )
-
                 password = get_parameter(
                     DB_PASSWORD_PARAMETER
                 )
-
                 return pymysql.connect(
-
                     host=host,
-
                     port=port,
-
                     user=username,
-
                     password=password,
-
                     database=database,
-
                     connect_timeout=10,
-
                     cursorclass=pymysql.cursors.DictCursor
                 )
-
-
-            # --------------------------------------------------
-            # CURRENT PRODUCT INVENTORY
-            # --------------------------------------------------
-
             def get_products():
-
                 connection = None
-
                 try:
-
                     connection = get_db_connection()
-
                     with connection.cursor() as cursor:
-
                         cursor.execute(
                             """
                             SELECT
@@ -553,29 +451,15 @@ Resources:
                             ORDER BY p.product_id
                             """
                         )
-
                         return cursor.fetchall()
-
                 finally:
-
                     if connection:
                         connection.close()
-
-
-            # --------------------------------------------------
-            # RECENT ORDERS
-            # --------------------------------------------------
-
             def get_recent_orders():
-
                 connection = None
-
                 try:
-
                     connection = get_db_connection()
-
                     with connection.cursor() as cursor:
-
                         cursor.execute(
                             """
                             SELECT
@@ -599,68 +483,49 @@ Resources:
                             LIMIT 20
                             """
                         )
-
                         return cursor.fetchall()
-
                 finally:
-
                     if connection:
                         connection.close()
-
-
-            # --------------------------------------------------
-            # DASHBOARD KPI COUNTS
-            # --------------------------------------------------
-
             def get_dashboard_stats():
-
                 connection = None
-
                 try:
                     connection = get_db_connection()
-
                     with connection.cursor() as cursor:
-
                         cursor.execute("""
                             SELECT COUNT(*) AS total_orders
                             FROM orders
                         """)
                         total_orders = cursor.fetchone()["total_orders"]
-
                         cursor.execute("""
                             SELECT COUNT(*) AS total_customers
                             FROM users
                         """)
                         total_customers = cursor.fetchone()["total_customers"]
-
                         cursor.execute("""
                             SELECT COUNT(*) AS confirmed_orders
                             FROM orders
                             WHERE status = 'CONFIRMED'
                         """)
                         confirmed_orders = cursor.fetchone()["confirmed_orders"]
-
                         cursor.execute("""
                             SELECT COUNT(*) AS failed_orders
                             FROM orders
                             WHERE status = 'FAILED'
                         """)
                         failed_orders = cursor.fetchone()["failed_orders"]
-
                         cursor.execute("""
                             SELECT COUNT(*) AS cancelled_orders
                             FROM orders
                             WHERE status = 'CANCELLED'
                         """)
                         cancelled_orders = cursor.fetchone()["cancelled_orders"]
-
                         cursor.execute("""
                             SELECT COUNT(*) AS total_products
                             FROM products
                             WHERE is_deleted = FALSE
                         """)
                         total_products = cursor.fetchone()["total_products"]
-
                         cursor.execute("""
                             SELECT COALESCE(SUM(i.stock_count), 0) AS total_stock
                             FROM inventory i
@@ -669,7 +534,6 @@ Resources:
                             WHERE p.is_deleted = FALSE
                         """)
                         total_stock = cursor.fetchone()["total_stock"]
-
                         cursor.execute("""
                             SELECT COUNT(*) AS low_stock_products
                             FROM inventory i
@@ -679,7 +543,6 @@ Resources:
                               AND i.stock_count <= i.low_stock_threshold
                         """)
                         low_stock_products = cursor.fetchone()["low_stock_products"]
-
                     return {
                         "total_orders": total_orders,
                         "total_customers": total_customers,
@@ -690,241 +553,133 @@ Resources:
                         "total_stock": total_stock,
                         "low_stock_products": low_stock_products
                     }
-
                 finally:
-
                     if connection:
                         connection.close()
-
-
-            # --------------------------------------------------
-            # REPORTS GENERATED KPI
-            # --------------------------------------------------
-
             def get_reports_generated():
-
                 if not REPORTS_BUCKET:
                     return 0
-
                 try:
-
                     result = s3.list_objects_v2(
                         Bucket=REPORTS_BUCKET,
                         Prefix="reports/"
                     )
-
                     contents = result.get(
                         "Contents",
                         []
                     )
-
                     return len(contents)
-
                 except Exception as error:
-
                     app.logger.warning(
                         "Could not get reports generated count: %s",
                         error
                     )
-
                     return 0
-
-
-            # --------------------------------------------------
-            # LATEST S3 REPORT
-            # --------------------------------------------------
-
             def get_latest_report():
-
                 if not REPORTS_BUCKET:
                     return None
-
-
                 result = s3.list_objects_v2(
-
                     Bucket=REPORTS_BUCKET,
-
                     Prefix="reports/"
                 )
-
-
                 contents = result.get(
                     "Contents",
                     []
                 )
-
-
                 if not contents:
                     return None
-
-
                 latest = max(
-
                     contents,
-
                     key=lambda item:
                         item["LastModified"]
                 )
-
-
                 object_key = latest["Key"]
-
-
                 url = s3.generate_presigned_url(
-
                     "get_object",
-
                     Params={
-
                         "Bucket":
                             REPORTS_BUCKET,
-
                         "Key":
                             object_key
                     },
-
                     ExpiresIn=3600
                 )
-
-
                 return {
-
                     "key":
                         object_key,
-
                     "url":
                         url,
-
                     "last_modified":
                         latest["LastModified"]
                 }
-
-
-            # --------------------------------------------------
-            # DASHBOARD
-            # --------------------------------------------------
-
             @app.route("/")
             def dashboard():
-
                 try:
-
                     products = get_products()
-
                     orders = get_recent_orders()
-
                     stats = get_dashboard_stats()
-
                     reports_generated = get_reports_generated()
-
                     latest_report = get_latest_report()
-
-
                     return render_template(
-
                         "index.html",
-
                         products=products,
-
                         orders=orders,
-
                         stats=stats,
-
                         reports_generated=reports_generated,
-
                         latest_report=latest_report,
-
                         generated_at=datetime.now()
                     )
-
-
                 except Exception as error:
-
                     app.logger.exception(
                         "Dashboard error"
                     )
-
                     return (
-
                         f"""
                         <h1>CloudMart Dashboard</h1>
                         <h2>Dashboard Error</h2>
                         <pre>{error}</pre>
                         """,
-
                         500
                     )
-
-
-            # --------------------------------------------------
-            # HEALTH CHECK
-            # --------------------------------------------------
-
             @app.route("/health")
             def health():
-
                 return {
-
                     "status":
                         "healthy",
-
                     "service":
                         "cloudmart-dashboard"
                 }
-
-
             if __name__ == "__main__":
-
                 app.run(
-
                     host="127.0.0.1",
-
                     port=5000
                 )
-
             PYTHON
-
-
-            # ==================================================
-            # CREATE HTML TEMPLATE
-            # ==================================================
-
             cat > /opt/cloudmart-dashboard/templates/index.html <<'HTML'
-
             <!DOCTYPE html>
-
             <html lang="en">
-
             <head>
-
                 <meta charset="UTF-8">
-
                 <meta
                     name="viewport"
                     content="width=device-width, initial-scale=1.0">
-
                 <title>
                     CloudMart Operations Dashboard
                 </title>
-
                 <style>
-
                     body {
                         font-family: Arial, sans-serif;
                         margin: 0;
                         padding: 30px;
                         background: #f5f6f8;
                     }
-
                     h1 {
                         margin-bottom: 5px;
                     }
-
                     .subtitle {
                         color: #666;
                         margin-bottom: 30px;
                     }
-
                     .card {
                         background: white;
                         padding: 20px;
@@ -934,52 +689,43 @@ Resources:
                             0 2px 8px
                             rgba(0,0,0,0.08);
                     }
-
                     .kpi-grid {
                         display: grid;
                         grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
                         gap: 15px;
                         margin-bottom: 25px;
                     }
-
                     .kpi-card {
                         background: white;
                         padding: 20px;
                         border-radius: 8px;
                         box-shadow: 0 2px 8px rgba(0,0,0,0.08);
                     }
-
                     .kpi-title {
                         color: #666;
                         font-size: 14px;
                         margin-bottom: 10px;
                     }
-
                     .kpi-value {
                         font-size: 30px;
                         font-weight: bold;
                     }
-
                     table {
                         width: 100%;
                         border-collapse: collapse;
                     }
-
                     th,
                     td {
                         padding: 10px;
                         border-bottom: 1px solid #ddd;
                         text-align: left;
                     }
-
                     th {
                         background: #f0f1f3;
                     }
-
                     .low-stock {
                         font-weight: bold;
                     }
-
                     .report-link {
                         display: inline-block;
                         padding: 10px 15px;
@@ -988,199 +734,129 @@ Resources:
                         text-decoration: none;
                         border-radius: 5px;
                     }
-
                 </style>
-
             </head>
-
-
             <body>
-
                 <h1>
                     CloudMart Operations Dashboard
                 </h1>
-
                 <div class="subtitle">
                     Environment: ${Environment}
                 </div>
-
-
                 <!-- ========================================= -->
                 <!-- KPI SUMMARY -->
                 <!-- ========================================= -->
-
                 <div class="kpi-grid">
-
                     <div class="kpi-card">
                         <div class="kpi-title">Total Orders</div>
                         <div class="kpi-value">{{ stats.total_orders }}</div>
                     </div>
-
                     <div class="kpi-card">
                         <div class="kpi-title">Total Customers</div>
                         <div class="kpi-value">{{ stats.total_customers }}</div>
                     </div>
-
                     <div class="kpi-card">
                         <div class="kpi-title">Confirmed Orders</div>
                         <div class="kpi-value">{{ stats.confirmed_orders }}</div>
                     </div>
-
                     <div class="kpi-card">
                         <div class="kpi-title">Failed Orders</div>
                         <div class="kpi-value">{{ stats.failed_orders }}</div>
                     </div>
-
                     <div class="kpi-card">
                         <div class="kpi-title">Cancelled Orders</div>
                         <div class="kpi-value">{{ stats.cancelled_orders }}</div>
                     </div>
-
                     <div class="kpi-card">
                         <div class="kpi-title">Total Products</div>
                         <div class="kpi-value">{{ stats.total_products }}</div>
                     </div>
-
                     <div class="kpi-card">
                         <div class="kpi-title">Total Stock</div>
                         <div class="kpi-value">{{ stats.total_stock }}</div>
                     </div>
-
                     <div class="kpi-card">
                         <div class="kpi-title">Low Stock Products</div>
                         <div class="kpi-value">{{ stats.low_stock_products }}</div>
                     </div>
-
                     <div class="kpi-card">
                         <div class="kpi-title">Reports Generated</div>
                         <div class="kpi-value">{{ reports_generated }}</div>
                     </div>
-
                 </div>
-
-
                 <!-- ========================================= -->
                 <!-- LATEST REPORT -->
                 <!-- ========================================= -->
-
                 <div class="card">
-
                     <h2>
                         Latest Daily Report
                     </h2>
-
-
                     {% if latest_report %}
-
                         <p>
                             {{ latest_report.key }}
                         </p>
-
                         <p>
-
                             Last modified:
-
                             {{ latest_report.last_modified }}
-
                         </p>
-
-
                         <a
                             class="report-link"
                             href="{{ latest_report.url }}"
                             target="_blank">
-
                             Open Latest Report
-
                         </a>
-
-
                     {% else %}
-
                         <p>
                             No report available.
                         </p>
-
                     {% endif %}
-
                 </div>
-
-
                 <!-- ========================================= -->
                 <!-- INVENTORY -->
                 <!-- ========================================= -->
-
                 <div class="card">
-
                     <h2>
                         Current Product Inventory
                     </h2>
-
-
                     <table>
-
                         <tr>
-
                             <th>ID</th>
                             <th>Product</th>
                             <th>Category</th>
                             <th>Price</th>
                             <th>Stock</th>
-
                         </tr>
-
-
                         {% for product in products %}
-
                         <tr>
-
                             <td>
                                 {{ product.id }}
                             </td>
-
                             <td>
                                 {{ product.name }}
                             </td>
-
                             <td>
                                 {{ product.category }}
                             </td>
-
                             <td>
                                 ₹{{ product.price }}
                             </td>
-
                             <td
                                 class="{% if product.stock_count <= 5 %}low-stock{% endif %}">
-
                                 {{ product.stock_count }}
-
                             </td>
-
                         </tr>
-
                         {% endfor %}
-
                     </table>
-
                 </div>
-
-
                 <!-- ========================================= -->
                 <!-- RECENT ORDERS -->
                 <!-- ========================================= -->
-
                 <div class="card">
-
                     <h2>
                         Recent Orders
                     </h2>
-
-
                     <table>
-
                         <tr>
-
                             <th>Order ID</th>
                             <th>Customer</th>
                             <th>Status</th>
@@ -1188,231 +864,95 @@ Resources:
                             <th>Quantity</th>
                             <th>Price</th>
                             <th>Created</th>
-
                         </tr>
-
-
                         {% for order in orders %}
-
                         <tr>
-
                             <td>
                                 {{ order.order_id }}
                             </td>
-
                             <td>
                                 {{ order.customer_id }}
                             </td>
-
                             <td>
                                 {{ order.status }}
                             </td>
-
                             <td>
                                 {{ order.product_name }}
                             </td>
-
                             <td>
                                 {{ order.quantity }}
                             </td>
-
                             <td>
                                 ₹{{ order.price }}
                             </td>
-
                             <td>
                                 {{ order.created_at }}
                             </td>
-
                         </tr>
-
                         {% endfor %}
-
                     </table>
-
                 </div>
-
             </body>
-
             </html>
-
             HTML
-
-
-            # ==================================================
-            # PYTHON REQUIREMENTS
-            # ==================================================
-
             cat > /opt/cloudmart-dashboard/requirements.txt <<'REQUIREMENTS'
-
             Flask
             boto3
             PyMySQL
             gunicorn
-
             REQUIREMENTS
-
-
-            # ==================================================
-            # INSTALL DEPENDENCIES
-            # ==================================================
-
             python3 -m pip install \
               -r /opt/cloudmart-dashboard/requirements.txt
-
-
-            # ==================================================
-            # SYSTEMD SERVICE
-            # ==================================================
-
             cat > /etc/systemd/system/cloudmart-dashboard.service <<SERVICE
-
             [Unit]
-
             Description=CloudMart Flask Dashboard
-
             After=network-online.target
-
             Wants=network-online.target
-
-
             [Service]
-
             User=root
-
             WorkingDirectory=/opt/cloudmart-dashboard
-
             Environment="ENVIRONMENT=${Environment}"
-
             Environment="AWS_REGION=${AWS::Region}"
-
             Environment="REPORTS_BUCKET=${ReportsBucketName}"
-
             ExecStart=/usr/local/bin/gunicorn \
               --workers 2 \
               --bind 127.0.0.1:5000 \
               app:app
-
             Restart=always
-
             RestartSec=5
-
-
             [Install]
-
             WantedBy=multi-user.target
-
             SERVICE
-
-
-            # ==================================================
-            # NGINX CONFIGURATION
-            # ==================================================
-
             cat > /etc/nginx/conf.d/cloudmart-dashboard.conf <<'NGINX'
-
             server {
-
                 listen 80;
-
                 server_name _;
-
-
                 location / {
-
                     proxy_pass
                         http://127.0.0.1:5000;
-
                     proxy_set_header
                         Host $host;
-
                     proxy_set_header
                         X-Real-IP $remote_addr;
-
                     proxy_set_header
                         X-Forwarded-For $proxy_add_x_forwarded_for;
-
                     proxy_set_header
                         X-Forwarded-Proto $scheme;
                 }
-
             }
-
             NGINX
-
-
-            # ==================================================
-            # START DASHBOARD
-            # ==================================================
-
             systemctl daemon-reload
-
             systemctl enable cloudmart-dashboard
-
             systemctl restart cloudmart-dashboard
-
-
             sleep 5
-
-
-            # ==================================================
-            # HEALTH CHECK
-            # ==================================================
-
             curl --fail \
               http://127.0.0.1:5000/health
-
-
-            # ==================================================
-            # START NGINX
-            # ==================================================
-
             systemctl enable nginx
-
             nginx -t
-
             systemctl restart nginx
-
-
             echo "===================================================="
             echo "CloudMart Dashboard deployed successfully"
             echo "===================================================="
-
-
-  # ============================================================
-  # ELASTIC IP FOR DASHBOARD
-  # ============================================================
-
-  DashboardElasticIP:
-    Type: AWS::EC2::EIP
-    Properties:
-      Domain: vpc
-
-      Tags:
-        - Key: Name
-          Value: !Sub CloudMart-${Environment}-Dashboard-EIP
-
-        - Key: Project
-          Value: CloudMart
-
-        - Key: Environment
-          Value: !Ref Environment
-
-
-  # ============================================================
-  # ASSOCIATE ELASTIC IP WITH DASHBOARD EC2
-  # ============================================================
-
-  DashboardElasticIPAssociation:
-    Type: AWS::EC2::EIPAssociation
-    Properties:
-      InstanceId:
-        !Ref DashboardEC2
-
-      AllocationId:
-        !GetAtt DashboardElasticIP.AllocationId
-
-
 # ============================================================
 # OUTPUTS
 # ============================================================
@@ -1484,10 +1024,10 @@ Outputs:
   DashboardPublicIp:
 
     Description:
-      CloudMart dashboard Elastic IP
+      CloudMart dashboard public IP
 
     Value:
-      !Ref DashboardElasticIP
+      !GetAtt DashboardEC2.PublicIp
 
 
   DashboardURL:
@@ -1497,4 +1037,4 @@ Outputs:
 
     Value:
       !Sub
-        http://${DashboardElasticIP}
+        http://${DashboardEC2.PublicIp}
