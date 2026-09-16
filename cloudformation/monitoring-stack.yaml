@@ -319,6 +319,151 @@ Resources:
           Value: !Ref Environment
 
 
+
+
+  # =======================================================
+  # ORDER LAMBDA ERROR RATE ALARM
+  # =======================================================
+
+  OrderLambdaErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+
+    Properties:
+
+      AlarmName:
+        !Sub CloudMart-${Environment}-OrderLambda-ErrorRate
+
+      AlarmDescription:
+        !Sub >
+          CloudMart ${Environment}: Order Lambda error rate
+          is above 5 percent.
+
+      EvaluationPeriods:
+        1
+
+      DatapointsToAlarm:
+        1
+
+      Threshold:
+        5
+
+      ComparisonOperator:
+        GreaterThanOrEqualToThreshold
+
+      TreatMissingData:
+        notBreaching
+
+      Metrics:
+
+        - Id: errors
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Errors
+              Dimensions:
+                - Name: FunctionName
+                  Value:
+                    !Sub CloudMart-${Environment}-OrderLambda
+            Period: 300
+            Stat: Sum
+          ReturnData: false
+
+        - Id: invocations
+          MetricStat:
+            Metric:
+              Namespace: AWS/Lambda
+              MetricName: Invocations
+              Dimensions:
+                - Name: FunctionName
+                  Value:
+                    !Sub CloudMart-${Environment}-OrderLambda
+            Period: 300
+            Stat: Sum
+          ReturnData: false
+
+        - Id: errorrate
+          Expression: 100 * errors / invocations
+          Label: Order Lambda Error Rate
+          ReturnData: true
+
+      AlarmActions:
+        - !Ref MonitoringSNSTopic
+
+      Tags:
+
+        - Key: Project
+          Value: CloudMart
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # =======================================================
+  # API GATEWAY 5XX ERROR ALARM
+  # =======================================================
+
+  ApiGateway5xxAlarm:
+    Type: AWS::CloudWatch::Alarm
+
+    Properties:
+
+      AlarmName:
+        !Sub CloudMart-${Environment}-API-5XXErrors
+
+      AlarmDescription:
+        !Sub >
+          CloudMart ${Environment}: API Gateway 5XX errors
+          detected.
+
+      Namespace:
+        AWS/ApiGateway
+
+      MetricName:
+        5XXError
+
+      Dimensions:
+
+        - Name: ApiName
+          Value:
+            !Sub CloudMart-${Environment}-API
+
+        - Name: Stage
+          Value:
+            !Ref Environment
+
+      Statistic:
+        Sum
+
+      Period:
+        300
+
+      EvaluationPeriods:
+        1
+
+      DatapointsToAlarm:
+        1
+
+      Threshold:
+        1
+
+      ComparisonOperator:
+        GreaterThanOrEqualToThreshold
+
+      TreatMissingData:
+        notBreaching
+
+      AlarmActions:
+        - !Ref MonitoringSNSTopic
+
+      Tags:
+
+        - Key: Project
+          Value: CloudMart
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
   # =======================================================
   # RDS CPU ALARM
   # =======================================================
@@ -397,7 +542,6 @@ Resources:
         !Sub |
           {
             "widgets": [
-
               {
                 "type": "metric",
                 "x": 0,
@@ -426,7 +570,6 @@ Resources:
                   ]
                 }
               },
-
               {
                 "type": "metric",
                 "x": 12,
@@ -451,7 +594,6 @@ Resources:
                   ]
                 }
               },
-
               {
                 "type": "metric",
                 "x": 0,
@@ -472,7 +614,6 @@ Resources:
                   ]
                 }
               },
-
               {
                 "type": "metric",
                 "x": 12,
@@ -501,7 +642,6 @@ Resources:
                   ]
                 }
               },
-
               {
                 "type": "metric",
                 "x": 0,
@@ -530,7 +670,6 @@ Resources:
                   ]
                 }
               },
-
               {
                 "type": "metric",
                 "x": 12,
@@ -553,7 +692,6 @@ Resources:
                   ]
                 }
               },
-
               {
                 "type": "metric",
                 "x": 0,
@@ -575,8 +713,115 @@ Resources:
                     ]
                   ]
                 }
+              },
+              {
+                "type": "metric",
+                "x": 12,
+                "y": 18,
+                "width": 12,
+                "height": 6,
+                "properties": {
+                  "title": "API Gateway",
+                  "view": "timeSeries",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "stat": "Sum",
+                  "metrics": [
+                    [
+                      "AWS/ApiGateway",
+                      "Count",
+                      "ApiName",
+                      "CloudMart-${Environment}-API",
+                      "Stage",
+                      "${Environment}"
+                    ],
+                    [
+                      ".",
+                      "4XXError",
+                      ".",
+                      ".",
+                      ".",
+                      "."
+                    ],
+                    [
+                      ".",
+                      "5XXError",
+                      ".",
+                      ".",
+                      ".",
+                      "."
+                    ]
+                  ]
+                }
+              },
+              {
+                "type": "metric",
+                "x": 0,
+                "y": 24,
+                "width": 12,
+                "height": 6,
+                "properties": {
+                  "title": "Lambda Invocations",
+                  "view": "timeSeries",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "stat": "Sum",
+                  "metrics": [
+                    [
+                      "AWS/Lambda",
+                      "Invocations",
+                      "FunctionName",
+                      "CloudMart-${Environment}-ProductLambda"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-OrderLambda"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-InventoryAlert"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-Authorizer"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-ReportGenerator"
+                    ]
+                  ]
+                }
+              },
+              {
+                "type": "metric",
+                "x": 12,
+                "y": 24,
+                "width": 12,
+                "height": 6,
+                "properties": {
+                  "title": "RDS Free Storage Space",
+                  "view": "timeSeries",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "stat": "Average",
+                  "metrics": [
+                    [
+                      "AWS/RDS",
+                      "FreeStorageSpace",
+                      "DBInstanceIdentifier",
+                      "cloudmart-${Environment}-db"
+                    ]
+                  ]
+                }
               }
-
             ]
           }
 
@@ -634,6 +879,23 @@ Outputs:
 
     Value:
       !GetAtt ReportGeneratorErrorsAlarm.Arn
+
+
+
+  ApiGateway5xxAlarmArn:
+    Description:
+      API Gateway 5XX errors CloudWatch alarm
+
+    Value:
+      !GetAtt ApiGateway5xxAlarm.Arn
+
+
+  OrderLambdaErrorRateAlarmArn:
+    Description:
+      Order Lambda error rate CloudWatch alarm
+
+    Value:
+      !GetAtt OrderLambdaErrorRateAlarm.Arn
 
 
   RdsCPUAlarmArn:
