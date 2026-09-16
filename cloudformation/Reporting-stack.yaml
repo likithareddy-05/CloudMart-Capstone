@@ -628,6 +628,12 @@ Resources:
                         total_orders = cursor.fetchone()["total_orders"]
 
                         cursor.execute("""
+                            SELECT COUNT(*) AS total_customers
+                            FROM users
+                        """)
+                        total_customers = cursor.fetchone()["total_customers"]
+
+                        cursor.execute("""
                             SELECT COUNT(*) AS confirmed_orders
                             FROM orders
                             WHERE status = 'CONFIRMED'
@@ -676,6 +682,7 @@ Resources:
 
                     return {
                         "total_orders": total_orders,
+                        "total_customers": total_customers,
                         "confirmed_orders": confirmed_orders,
                         "failed_orders": failed_orders,
                         "cancelled_orders": cancelled_orders,
@@ -688,6 +695,39 @@ Resources:
 
                     if connection:
                         connection.close()
+
+
+            # --------------------------------------------------
+            # REPORTS GENERATED KPI
+            # --------------------------------------------------
+
+            def get_reports_generated():
+
+                if not REPORTS_BUCKET:
+                    return 0
+
+                try:
+
+                    result = s3.list_objects_v2(
+                        Bucket=REPORTS_BUCKET,
+                        Prefix="reports/"
+                    )
+
+                    contents = result.get(
+                        "Contents",
+                        []
+                    )
+
+                    return len(contents)
+
+                except Exception as error:
+
+                    app.logger.warning(
+                        "Could not get reports generated count: %s",
+                        error
+                    )
+
+                    return 0
 
 
             # --------------------------------------------------
@@ -775,6 +815,8 @@ Resources:
 
                     stats = get_dashboard_stats()
 
+                    reports_generated = get_reports_generated()
+
                     latest_report = get_latest_report()
 
 
@@ -787,6 +829,8 @@ Resources:
                         orders=orders,
 
                         stats=stats,
+
+                        reports_generated=reports_generated,
 
                         latest_report=latest_report,
 
@@ -973,6 +1017,11 @@ Resources:
                     </div>
 
                     <div class="kpi-card">
+                        <div class="kpi-title">Total Customers</div>
+                        <div class="kpi-value">{{ stats.total_customers }}</div>
+                    </div>
+
+                    <div class="kpi-card">
                         <div class="kpi-title">Confirmed Orders</div>
                         <div class="kpi-value">{{ stats.confirmed_orders }}</div>
                     </div>
@@ -1000,6 +1049,11 @@ Resources:
                     <div class="kpi-card">
                         <div class="kpi-title">Low Stock Products</div>
                         <div class="kpi-value">{{ stats.low_stock_products }}</div>
+                    </div>
+
+                    <div class="kpi-card">
+                        <div class="kpi-title">Reports Generated</div>
+                        <div class="kpi-value">{{ reports_generated }}</div>
                     </div>
 
                 </div>
@@ -1325,6 +1379,40 @@ Resources:
             echo "===================================================="
 
 
+  # ============================================================
+  # ELASTIC IP FOR DASHBOARD
+  # ============================================================
+
+  DashboardElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+      Tags:
+        - Key: Name
+          Value: !Sub CloudMart-${Environment}-Dashboard-EIP
+
+        - Key: Project
+          Value: CloudMart
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # ============================================================
+  # ASSOCIATE ELASTIC IP WITH DASHBOARD EC2
+  # ============================================================
+
+  DashboardElasticIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId:
+        !Ref DashboardEC2
+
+      AllocationId:
+        !GetAtt DashboardElasticIP.AllocationId
+
+
 # ============================================================
 # OUTPUTS
 # ============================================================
@@ -1396,10 +1484,10 @@ Outputs:
   DashboardPublicIp:
 
     Description:
-      CloudMart dashboard public IP
+      CloudMart dashboard Elastic IP
 
     Value:
-      !GetAtt DashboardEC2.PublicIp
+      !Ref DashboardElasticIP
 
 
   DashboardURL:
@@ -1409,4 +1497,4 @@ Outputs:
 
     Value:
       !Sub
-        http://${DashboardEC2.PublicIp}
+        http://${DashboardElasticIP}
