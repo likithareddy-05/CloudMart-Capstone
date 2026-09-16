@@ -339,620 +339,96 @@ Resources:
 
       UserData:
         Fn::Base64: !Sub |
+            #!/bin/bash
             set -e
-            exec > >(tee /var/log/cloudmart-userdata.log | logger -t cloudmart-userdata -s 2>/dev/console) 2>&1
-            echo "===================================================="
-            echo "CloudMart Dashboard UserData started"
-            echo "===================================================="
-            dnf update -y
-            dnf install -y \
-              python3 \
-              python3-pip \
-              nginx \
-              amazon-ssm-agent
-            systemctl enable amazon-ssm-agent
-            systemctl start amazon-ssm-agent
-            mkdir -p /opt/cloudmart-dashboard
-            mkdir -p /opt/cloudmart-dashboard/templates
-            cat > /opt/cloudmart-dashboard/app.py <<'PYTHON'
-            import logging
-            import os
-            from datetime import datetime
-            import boto3
-            import pymysql
-            from flask import Flask, render_template
-            app = Flask(__name__)
-            logging.basicConfig(level=logging.INFO)
-            ENVIRONMENT = os.environ.get(
-                "ENVIRONMENT",
-                "dev"
-            )
-            AWS_REGION = os.environ.get(
-                "AWS_REGION",
-                "ap-south-1"
-            )
-            REPORTS_BUCKET = os.environ.get(
-                "REPORTS_BUCKET"
-            )
-            DB_HOST_PARAMETER = (
-                f"/cloudmart/{ENVIRONMENT}/db/host"
-            )
-            DB_PORT_PARAMETER = (
-                f"/cloudmart/{ENVIRONMENT}/db/port"
-            )
-            DB_NAME_PARAMETER = (
-                f"/cloudmart/{ENVIRONMENT}/db/name"
-            )
-            DB_USERNAME_PARAMETER = (
-                f"/cloudmart/{ENVIRONMENT}/db/username"
-            )
-            DB_PASSWORD_PARAMETER = (
-                f"/cloudmart/{ENVIRONMENT}/db/password"
-            )
-            ssm = boto3.client(
-                "ssm",
-                region_name=AWS_REGION
-            )
-            s3 = boto3.client(
-                "s3",
-                region_name=AWS_REGION
-            )
-            def get_parameter(name):
-                result = ssm.get_parameter(
-                    Name=name,
-                    WithDecryption=True
-                )
-                return result["Parameter"]["Value"]
-            def get_db_connection():
-                host = get_parameter(
-                    DB_HOST_PARAMETER
-                )
-                port = int(
-                    get_parameter(
-                        DB_PORT_PARAMETER
-                    )
-                )
-                database = get_parameter(
-                    DB_NAME_PARAMETER
-                )
-                username = get_parameter(
-                    DB_USERNAME_PARAMETER
-                )
-                password = get_parameter(
-                    DB_PASSWORD_PARAMETER
-                )
-                return pymysql.connect(
-                    host=host,
-                    port=port,
-                    user=username,
-                    password=password,
-                    database=database,
-                    connect_timeout=10,
-                    cursorclass=pymysql.cursors.DictCursor
-                )
-            def get_products():
-                connection = None
-                try:
-                    connection = get_db_connection()
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            """
-                            SELECT
-                                p.product_id AS id,
-                                p.name,
-                                p.description,
-                                p.price,
-                                p.category,
-                                i.stock_count
-                            FROM products p
-                            INNER JOIN inventory i
-                                ON p.product_id = i.product_id
-                            WHERE p.is_deleted = FALSE
-                            ORDER BY p.product_id
-                            """
-                        )
-                        return cursor.fetchall()
-                finally:
-                    if connection:
-                        connection.close()
-            def get_recent_orders():
-                connection = None
-                try:
-                    connection = get_db_connection()
-                    with connection.cursor() as cursor:
-                        cursor.execute(
-                            """
-                            SELECT
-                                o.order_id AS order_id,
-                                o.customer_id,
-                                o.status,
-                                o.created_at,
-                                oi.product_id,
-                                p.name AS product_name,
-                                oi.quantity,
-                                oi.unit_price AS price
-                            FROM orders o
-                            INNER JOIN order_items oi
-                                ON o.order_id = oi.order_id
-                            INNER JOIN products p
-                                ON oi.product_id = p.product_id
-                            WHERE p.is_deleted = FALSE
-                            ORDER BY
-                                o.created_at DESC,
-                                oi.order_item_id DESC
-                            LIMIT 20
-                            """
-                        )
-                        return cursor.fetchall()
-                finally:
-                    if connection:
-                        connection.close()
-            def get_dashboard_stats():
-                connection = None
-                try:
-                    connection = get_db_connection()
-                    with connection.cursor() as cursor:
-                        cursor.execute("""
-                            SELECT COUNT(*) AS total_orders
-                            FROM orders
-                        """)
-                        total_orders = cursor.fetchone()["total_orders"]
-                        cursor.execute("""
-                            SELECT COUNT(*) AS total_customers
-                            FROM users
-                        """)
-                        total_customers = cursor.fetchone()["total_customers"]
-                        cursor.execute("""
-                            SELECT COUNT(*) AS confirmed_orders
-                            FROM orders
-                            WHERE status = 'CONFIRMED'
-                        """)
-                        confirmed_orders = cursor.fetchone()["confirmed_orders"]
-                        cursor.execute("""
-                            SELECT COUNT(*) AS failed_orders
-                            FROM orders
-                            WHERE status = 'FAILED'
-                        """)
-                        failed_orders = cursor.fetchone()["failed_orders"]
-                        cursor.execute("""
-                            SELECT COUNT(*) AS cancelled_orders
-                            FROM orders
-                            WHERE status = 'CANCELLED'
-                        """)
-                        cancelled_orders = cursor.fetchone()["cancelled_orders"]
-                        cursor.execute("""
-                            SELECT COUNT(*) AS total_products
-                            FROM products
-                            WHERE is_deleted = FALSE
-                        """)
-                        total_products = cursor.fetchone()["total_products"]
-                        cursor.execute("""
-                            SELECT COALESCE(SUM(i.stock_count), 0) AS total_stock
-                            FROM inventory i
-                            INNER JOIN products p
-                                ON p.product_id = i.product_id
-                            WHERE p.is_deleted = FALSE
-                        """)
-                        total_stock = cursor.fetchone()["total_stock"]
-                        cursor.execute("""
-                            SELECT COUNT(*) AS low_stock_products
-                            FROM inventory i
-                            INNER JOIN products p
-                                ON p.product_id = i.product_id
-                            WHERE p.is_deleted = FALSE
-                              AND i.stock_count <= i.low_stock_threshold
-                        """)
-                        low_stock_products = cursor.fetchone()["low_stock_products"]
-                    return {
-                        "total_orders": total_orders,
-                        "total_customers": total_customers,
-                        "confirmed_orders": confirmed_orders,
-                        "failed_orders": failed_orders,
-                        "cancelled_orders": cancelled_orders,
-                        "total_products": total_products,
-                        "total_stock": total_stock,
-                        "low_stock_products": low_stock_products
-                    }
-                finally:
-                    if connection:
-                        connection.close()
-            def get_reports_generated():
-                if not REPORTS_BUCKET:
-                    return 0
-                try:
-                    result = s3.list_objects_v2(
-                        Bucket=REPORTS_BUCKET,
-                        Prefix="reports/"
-                    )
-                    contents = result.get(
-                        "Contents",
-                        []
-                    )
-                    return len(contents)
-                except Exception as error:
-                    app.logger.warning(
-                        "Could not get reports generated count: %s",
-                        error
-                    )
-                    return 0
-            def get_latest_report():
-                if not REPORTS_BUCKET:
-                    return None
-                result = s3.list_objects_v2(
-                    Bucket=REPORTS_BUCKET,
-                    Prefix="reports/"
-                )
-                contents = result.get(
-                    "Contents",
-                    []
-                )
-                if not contents:
-                    return None
-                latest = max(
-                    contents,
-                    key=lambda item:
-                        item["LastModified"]
-                )
-                object_key = latest["Key"]
-                url = s3.generate_presigned_url(
-                    "get_object",
-                    Params={
-                        "Bucket":
-                            REPORTS_BUCKET,
-                        "Key":
-                            object_key
-                    },
-                    ExpiresIn=3600
-                )
-                return {
-                    "key":
-                        object_key,
-                    "url":
-                        url,
-                    "last_modified":
-                        latest["LastModified"]
-                }
-            @app.route("/")
-            def dashboard():
-                try:
-                    products = get_products()
-                    orders = get_recent_orders()
-                    stats = get_dashboard_stats()
-                    reports_generated = get_reports_generated()
-                    latest_report = get_latest_report()
-                    return render_template(
-                        "index.html",
-                        products=products,
-                        orders=orders,
-                        stats=stats,
-                        reports_generated=reports_generated,
-                        latest_report=latest_report,
-                        generated_at=datetime.now()
-                    )
-                except Exception as error:
-                    app.logger.exception(
-                        "Dashboard error"
-                    )
-                    return (
-                        f"""
-                        <h1>CloudMart Dashboard</h1>
-                        <h2>Dashboard Error</h2>
-                        <pre>{error}</pre>
-                        """,
-                        500
-                    )
-            @app.route("/health")
-            def health():
-                return {
-                    "status":
-                        "healthy",
-                    "service":
-                        "cloudmart-dashboard"
-                }
-            if __name__ == "__main__":
-                app.run(
-                    host="127.0.0.1",
-                    port=5000
-                )
-            PYTHON
-            cat > /opt/cloudmart-dashboard/templates/index.html <<'HTML'
-            <!DOCTYPE html>
-            <html lang="en">
-            <head>
-                <meta charset="UTF-8">
-                <meta
-                    name="viewport"
-                    content="width=device-width, initial-scale=1.0">
-                <title>
-                    CloudMart Operations Dashboard
-                </title>
-                <style>
-                    body {
-                        font-family: Arial, sans-serif;
-                        margin: 0;
-                        padding: 30px;
-                        background: #f5f6f8;
-                    }
-                    h1 {
-                        margin-bottom: 5px;
-                    }
-                    .subtitle {
-                        color: #666;
-                        margin-bottom: 30px;
-                    }
-                    .card {
-                        background: white;
-                        padding: 20px;
-                        margin-bottom: 25px;
-                        border-radius: 8px;
-                        box-shadow:
-                            0 2px 8px
-                            rgba(0,0,0,0.08);
-                    }
-                    .kpi-grid {
-                        display: grid;
-                        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-                        gap: 15px;
-                        margin-bottom: 25px;
-                    }
-                    .kpi-card {
-                        background: white;
-                        padding: 20px;
-                        border-radius: 8px;
-                        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-                    }
-                    .kpi-title {
-                        color: #666;
-                        font-size: 14px;
-                        margin-bottom: 10px;
-                    }
-                    .kpi-value {
-                        font-size: 30px;
-                        font-weight: bold;
-                    }
-                    table {
-                        width: 100%;
-                        border-collapse: collapse;
-                    }
-                    th,
-                    td {
-                        padding: 10px;
-                        border-bottom: 1px solid #ddd;
-                        text-align: left;
-                    }
-                    th {
-                        background: #f0f1f3;
-                    }
-                    .low-stock {
-                        font-weight: bold;
-                    }
-                    .report-link {
-                        display: inline-block;
-                        padding: 10px 15px;
-                        background: #222;
-                        color: white;
-                        text-decoration: none;
-                        border-radius: 5px;
-                    }
-                </style>
-            </head>
-            <body>
-                <h1>
-                    CloudMart Operations Dashboard
-                </h1>
-                <div class="subtitle">
-                    Environment: ${Environment}
-                </div>
-                <!-- ========================================= -->
-                <!-- KPI SUMMARY -->
-                <!-- ========================================= -->
-                <div class="kpi-grid">
-                    <div class="kpi-card">
-                        <div class="kpi-title">Total Orders</div>
-                        <div class="kpi-value">{{ stats.total_orders }}</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-title">Total Customers</div>
-                        <div class="kpi-value">{{ stats.total_customers }}</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-title">Confirmed Orders</div>
-                        <div class="kpi-value">{{ stats.confirmed_orders }}</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-title">Failed Orders</div>
-                        <div class="kpi-value">{{ stats.failed_orders }}</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-title">Cancelled Orders</div>
-                        <div class="kpi-value">{{ stats.cancelled_orders }}</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-title">Total Products</div>
-                        <div class="kpi-value">{{ stats.total_products }}</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-title">Total Stock</div>
-                        <div class="kpi-value">{{ stats.total_stock }}</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-title">Low Stock Products</div>
-                        <div class="kpi-value">{{ stats.low_stock_products }}</div>
-                    </div>
-                    <div class="kpi-card">
-                        <div class="kpi-title">Reports Generated</div>
-                        <div class="kpi-value">{{ reports_generated }}</div>
-                    </div>
-                </div>
-                <!-- ========================================= -->
-                <!-- LATEST REPORT -->
-                <!-- ========================================= -->
-                <div class="card">
-                    <h2>
-                        Latest Daily Report
-                    </h2>
-                    {% if latest_report %}
-                        <p>
-                            {{ latest_report.key }}
-                        </p>
-                        <p>
-                            Last modified:
-                            {{ latest_report.last_modified }}
-                        </p>
-                        <a
-                            class="report-link"
-                            href="{{ latest_report.url }}"
-                            target="_blank">
-                            Open Latest Report
-                        </a>
-                    {% else %}
-                        <p>
-                            No report available.
-                        </p>
-                    {% endif %}
-                </div>
-                <!-- ========================================= -->
-                <!-- INVENTORY -->
-                <!-- ========================================= -->
-                <div class="card">
-                    <h2>
-                        Current Product Inventory
-                    </h2>
-                    <table>
-                        <tr>
-                            <th>ID</th>
-                            <th>Product</th>
-                            <th>Category</th>
-                            <th>Price</th>
-                            <th>Stock</th>
-                        </tr>
-                        {% for product in products %}
-                        <tr>
-                            <td>
-                                {{ product.id }}
-                            </td>
-                            <td>
-                                {{ product.name }}
-                            </td>
-                            <td>
-                                {{ product.category }}
-                            </td>
-                            <td>
-                                ₹{{ product.price }}
-                            </td>
-                            <td
-                                class="{% if product.stock_count <= 5 %}low-stock{% endif %}">
-                                {{ product.stock_count }}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </table>
-                </div>
-                <!-- ========================================= -->
-                <!-- RECENT ORDERS -->
-                <!-- ========================================= -->
-                <div class="card">
-                    <h2>
-                        Recent Orders
-                    </h2>
-                    <table>
-                        <tr>
-                            <th>Order ID</th>
-                            <th>Customer</th>
-                            <th>Status</th>
-                            <th>Product</th>
-                            <th>Quantity</th>
-                            <th>Price</th>
-                            <th>Created</th>
-                        </tr>
-                        {% for order in orders %}
-                        <tr>
-                            <td>
-                                {{ order.order_id }}
-                            </td>
-                            <td>
-                                {{ order.customer_id }}
-                            </td>
-                            <td>
-                                {{ order.status }}
-                            </td>
-                            <td>
-                                {{ order.product_name }}
-                            </td>
-                            <td>
-                                {{ order.quantity }}
-                            </td>
-                            <td>
-                                ₹{{ order.price }}
-                            </td>
-                            <td>
-                                {{ order.created_at }}
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </table>
-                </div>
-            </body>
-            </html>
-            HTML
-            cat > /opt/cloudmart-dashboard/requirements.txt <<'REQUIREMENTS'
-            Flask
-            boto3
-            PyMySQL
-            gunicorn
-            REQUIREMENTS
-            python3 -m pip install \
-              -r /opt/cloudmart-dashboard/requirements.txt
-            cat > /etc/systemd/system/cloudmart-dashboard.service <<SERVICE
-            [Unit]
-            Description=CloudMart Flask Dashboard
-            After=network-online.target
-            Wants=network-online.target
-            [Service]
-            User=root
-            WorkingDirectory=/opt/cloudmart-dashboard
-            Environment="ENVIRONMENT=${Environment}"
-            Environment="AWS_REGION=${AWS::Region}"
-            Environment="REPORTS_BUCKET=${ReportsBucketName}"
-            ExecStart=/usr/local/bin/gunicorn \
-              --workers 2 \
-              --bind 127.0.0.1:5000 \
-              app:app
-            Restart=always
-            RestartSec=5
-            [Install]
-            WantedBy=multi-user.target
-            SERVICE
-            cat > /etc/nginx/conf.d/cloudmart-dashboard.conf <<'NGINX'
-            server {
-                listen 80;
-                server_name _;
-                location / {
-                    proxy_pass
-                        http://127.0.0.1:5000;
-                    proxy_set_header
-                        Host $host;
-                    proxy_set_header
-                        X-Real-IP $remote_addr;
-                    proxy_set_header
-                        X-Forwarded-For $proxy_add_x_forwarded_for;
-                    proxy_set_header
-                        X-Forwarded-Proto $scheme;
-                }
-            }
-            NGINX
-            systemctl daemon-reload
-            systemctl enable cloudmart-dashboard
-            systemctl restart cloudmart-dashboard
-            sleep 5
-            curl --fail \
-              http://127.0.0.1:5000/health
-            systemctl enable nginx
-            nginx -t
-            systemctl restart nginx
-            echo "===================================================="
-            echo "CloudMart Dashboard deployed successfully"
-            echo "===================================================="
+            export ENVIRONMENT='${Environment}'
+            export AWS_REGION='${AWS::Region}'
+            export REPORTS_BUCKET='${ReportsBucketName}'
+            cat > /tmp/cloudmart-userdata.gz.b64 <<'CLOUDMART_GZIP'
+            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
+            XsD3LzvmuRygUAAA
+            CLOUDMART_GZIP
+            base64 -d /tmp/cloudmart-userdata.gz.b64 | gzip -d > /tmp/cloudmart-userdata.sh
+            chmod +x /tmp/cloudmart-userdata.sh
+            /bin/bash /tmp/cloudmart-userdata.sh
+
+  # ============================================================
+  # DASHBOARD ELASTIC IP
+  # ============================================================
+
+  DashboardElasticIP:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub CloudMart-${Environment}-Dashboard-EIP
+        - Key: Project
+          Value: CloudMart
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # ============================================================
+  # ASSOCIATE ELASTIC IP WITH DASHBOARD EC2
+  # ============================================================
+
+  DashboardElasticIPAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId:
+        !Ref DashboardEC2
+      AllocationId:
+        !GetAtt DashboardElasticIP.AllocationId
+
+
 # ============================================================
 # OUTPUTS
 # ============================================================
@@ -1024,10 +500,10 @@ Outputs:
   DashboardPublicIp:
 
     Description:
-      CloudMart dashboard public IP
+      CloudMart dashboard Elastic IP
 
     Value:
-      !GetAtt DashboardEC2.PublicIp
+      !Ref DashboardElasticIP
 
 
   DashboardURL:
@@ -1037,4 +513,4 @@ Outputs:
 
     Value:
       !Sub
-        http://${DashboardEC2.PublicIp}
+        http://${DashboardElasticIP}
