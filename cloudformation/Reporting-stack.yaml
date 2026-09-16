@@ -609,6 +609,88 @@ Resources:
 
 
             # --------------------------------------------------
+            # DASHBOARD KPI COUNTS
+            # --------------------------------------------------
+
+            def get_dashboard_stats():
+
+                connection = None
+
+                try:
+                    connection = get_db_connection()
+
+                    with connection.cursor() as cursor:
+
+                        cursor.execute("""
+                            SELECT COUNT(*) AS total_orders
+                            FROM orders
+                        """)
+                        total_orders = cursor.fetchone()["total_orders"]
+
+                        cursor.execute("""
+                            SELECT COUNT(*) AS confirmed_orders
+                            FROM orders
+                            WHERE status = 'CONFIRMED'
+                        """)
+                        confirmed_orders = cursor.fetchone()["confirmed_orders"]
+
+                        cursor.execute("""
+                            SELECT COUNT(*) AS failed_orders
+                            FROM orders
+                            WHERE status = 'FAILED'
+                        """)
+                        failed_orders = cursor.fetchone()["failed_orders"]
+
+                        cursor.execute("""
+                            SELECT COUNT(*) AS cancelled_orders
+                            FROM orders
+                            WHERE status = 'CANCELLED'
+                        """)
+                        cancelled_orders = cursor.fetchone()["cancelled_orders"]
+
+                        cursor.execute("""
+                            SELECT COUNT(*) AS total_products
+                            FROM products
+                            WHERE is_deleted = FALSE
+                        """)
+                        total_products = cursor.fetchone()["total_products"]
+
+                        cursor.execute("""
+                            SELECT COALESCE(SUM(i.stock_count), 0) AS total_stock
+                            FROM inventory i
+                            INNER JOIN products p
+                                ON p.product_id = i.product_id
+                            WHERE p.is_deleted = FALSE
+                        """)
+                        total_stock = cursor.fetchone()["total_stock"]
+
+                        cursor.execute("""
+                            SELECT COUNT(*) AS low_stock_products
+                            FROM inventory i
+                            INNER JOIN products p
+                                ON p.product_id = i.product_id
+                            WHERE p.is_deleted = FALSE
+                              AND i.stock_count <= i.low_stock_threshold
+                        """)
+                        low_stock_products = cursor.fetchone()["low_stock_products"]
+
+                    return {
+                        "total_orders": total_orders,
+                        "confirmed_orders": confirmed_orders,
+                        "failed_orders": failed_orders,
+                        "cancelled_orders": cancelled_orders,
+                        "total_products": total_products,
+                        "total_stock": total_stock,
+                        "low_stock_products": low_stock_products
+                    }
+
+                finally:
+
+                    if connection:
+                        connection.close()
+
+
+            # --------------------------------------------------
             # LATEST S3 REPORT
             # --------------------------------------------------
 
@@ -691,6 +773,8 @@ Resources:
 
                     orders = get_recent_orders()
 
+                    stats = get_dashboard_stats()
+
                     latest_report = get_latest_report()
 
 
@@ -701,6 +785,8 @@ Resources:
                         products=products,
 
                         orders=orders,
+
+                        stats=stats,
 
                         latest_report=latest_report,
 
@@ -805,6 +891,31 @@ Resources:
                             rgba(0,0,0,0.08);
                     }
 
+                    .kpi-grid {
+                        display: grid;
+                        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+                        gap: 15px;
+                        margin-bottom: 25px;
+                    }
+
+                    .kpi-card {
+                        background: white;
+                        padding: 20px;
+                        border-radius: 8px;
+                        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+                    }
+
+                    .kpi-title {
+                        color: #666;
+                        font-size: 14px;
+                        margin-bottom: 10px;
+                    }
+
+                    .kpi-value {
+                        font-size: 30px;
+                        font-weight: bold;
+                    }
+
                     table {
                         width: 100%;
                         border-collapse: collapse;
@@ -847,6 +958,50 @@ Resources:
 
                 <div class="subtitle">
                     Environment: ${Environment}
+                </div>
+
+
+                <!-- ========================================= -->
+                <!-- KPI SUMMARY -->
+                <!-- ========================================= -->
+
+                <div class="kpi-grid">
+
+                    <div class="kpi-card">
+                        <div class="kpi-title">Total Orders</div>
+                        <div class="kpi-value">{{ stats.total_orders }}</div>
+                    </div>
+
+                    <div class="kpi-card">
+                        <div class="kpi-title">Confirmed Orders</div>
+                        <div class="kpi-value">{{ stats.confirmed_orders }}</div>
+                    </div>
+
+                    <div class="kpi-card">
+                        <div class="kpi-title">Failed Orders</div>
+                        <div class="kpi-value">{{ stats.failed_orders }}</div>
+                    </div>
+
+                    <div class="kpi-card">
+                        <div class="kpi-title">Cancelled Orders</div>
+                        <div class="kpi-value">{{ stats.cancelled_orders }}</div>
+                    </div>
+
+                    <div class="kpi-card">
+                        <div class="kpi-title">Total Products</div>
+                        <div class="kpi-value">{{ stats.total_products }}</div>
+                    </div>
+
+                    <div class="kpi-card">
+                        <div class="kpi-title">Total Stock</div>
+                        <div class="kpi-value">{{ stats.total_stock }}</div>
+                    </div>
+
+                    <div class="kpi-card">
+                        <div class="kpi-title">Low Stock Products</div>
+                        <div class="kpi-value">{{ stats.low_stock_products }}</div>
+                    </div>
+
                 </div>
 
 

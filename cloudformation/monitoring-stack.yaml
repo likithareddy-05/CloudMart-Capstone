@@ -29,9 +29,9 @@ Parameters:
 
   NotificationEmail:
     Type: String
-
+    NoEcho: true
     Description:
-      Email address that receives CloudMart monitoring alerts
+      Email address used to create the CloudMart monitoring SSM parameter
 
 
 # =========================================================
@@ -39,6 +39,30 @@ Parameters:
 # =========================================================
 
 Resources:
+
+
+  # =======================================================
+  # MONITORING EMAIL SSM PARAMETER
+  # =======================================================
+
+  MonitoringEmailParameter:
+    Type: AWS::SSM::Parameter
+
+    Properties:
+      Name:
+        !Sub /cloudmart/${Environment}/monitoring/email
+
+      Type: String
+
+      Value:
+        !Ref NotificationEmail
+
+      Description:
+        !Sub CloudMart ${Environment} monitoring notification email
+
+      Tags:
+        Project: CloudMart
+        Environment: !Ref Environment
 
 
   # =======================================================
@@ -71,6 +95,9 @@ Resources:
 
   MonitoringEmailSubscription:
     Type: AWS::SNS::Subscription
+
+    DependsOn:
+      - MonitoringEmailParameter
 
     Properties:
 

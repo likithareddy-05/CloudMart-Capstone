@@ -2,6 +2,11 @@ name: Deploy Monitoring Stack
 
 on:
   workflow_dispatch:
+    inputs:
+      notification_email:
+        description: "Email address for CloudMart monitoring alerts"
+        required: true
+        type: string
 
 permissions:
   id-token: write
@@ -107,7 +112,7 @@ jobs:
             --template-file "${TEMPLATE_FILE}" \
             --parameter-overrides \
               Environment="${ENVIRONMENT}" \
-              NotificationEmail="${{ secrets.MONITORING_EMAIL }}" \
+              NotificationEmail="${{ inputs.notification_email }}" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "${AWS_REGION}"
 
