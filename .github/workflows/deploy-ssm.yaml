@@ -248,6 +248,54 @@ jobs:
           echo "ADMIN ID parameter created/updated."
 
 
+      # =========================================================
+      # ORDER EMAIL SSM PARAMETER
+      # =========================================================
+
+      - name: Create Order Email Parameter
+        env:
+          ORDER_EMAIL: ${{ secrets.ORDER_EMAIL }}
+        run: |
+
+          if [ -z "$ORDER_EMAIL" ]; then
+            echo "ERROR: ORDER_EMAIL GitHub secret is missing."
+            exit 1
+          fi
+
+          aws ssm put-parameter \
+            --name "/cloudmart/$ENVIRONMENT/notifications/order-email" \
+            --type "String" \
+            --value "$ORDER_EMAIL" \
+            --overwrite \
+            --region "$AWS_REGION"
+
+          echo "Order email SSM parameter created/updated."
+
+
+      # =========================================================
+      # LOW STOCK EMAIL SSM PARAMETER
+      # =========================================================
+
+      - name: Create Low Stock Email Parameter
+        env:
+          LOW_STOCK_EMAIL: ${{ secrets.LOW_STOCK_EMAIL }}
+        run: |
+
+          if [ -z "$LOW_STOCK_EMAIL" ]; then
+            echo "ERROR: LOW_STOCK_EMAIL GitHub secret is missing."
+            exit 1
+          fi
+
+          aws ssm put-parameter \
+            --name "/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
+            --type "String" \
+            --value "$LOW_STOCK_EMAIL" \
+            --overwrite \
+            --region "$AWS_REGION"
+
+          echo "Low stock email SSM parameter created/updated."
+
+
       # =====================================================
       # 12. VERIFY SSM PARAMETERS
       # =====================================================
