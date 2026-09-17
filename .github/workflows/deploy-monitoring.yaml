@@ -2,11 +2,6 @@ name: Deploy Monitoring Stack
 
 on:
   workflow_dispatch:
-    inputs:
-      notification_email:
-        description: "Email address for CloudMart monitoring alerts"
-        required: true
-        type: string
 
 permissions:
   id-token: write
@@ -17,6 +12,7 @@ env:
   STACK_NAME: cloudmart-dev-monitoring
   TEMPLATE_FILE: cloudformation/monitoring-stack.yaml
   ENVIRONMENT: dev
+  MONITORING_EMAIL_PARAMETER: /cloudmart/dev/monitoring/email
 
 jobs:
 
@@ -46,7 +42,7 @@ jobs:
 
 
       # =========================================================
-      # VERIFY TEMPLATE EXISTS
+      # VERIFY MONITORING TEMPLATE
       # =========================================================
 
       - name: Verify monitoring template
@@ -68,9 +64,48 @@ jobs:
           echo "Validating CloudFormation template..."
 
           aws cloudformation validate-template \
-            --template-body file://"${TEMPLATE_FILE}"
+            --template-body file://"${TEMPLATE_FILE}" \
+            --region "${AWS_REGION}"
 
           echo "CloudFormation template validation successful."
+
+
+      # =========================================================
+      # GET MONITORING EMAIL FROM SSM
+      # =========================================================
+
+      - name: Get monitoring email from SSM
+        id: monitoring-email
+        run: |
+
+          echo "Checking monitoring email parameter in SSM..."
+
+          if ! aws ssm get-parameter \
+            --name "${MONITORING_EMAIL_PARAMETER}" \
+            --region "${AWS_REGION}" \
+            >/dev/null 2>&1
+          then
+            echo "ERROR: Monitoring email SSM parameter does not exist."
+            echo "Expected parameter:"
+            echo "${MONITORING_EMAIL_PARAMETER}"
+            exit 1
+          fi
+
+          MONITORING_EMAIL=$(aws ssm get-parameter \
+            --name "${MONITORING_EMAIL_PARAMETER}" \
+            --region "${AWS_REGION}" \
+            --query 'Parameter.Value' \
+            --output text)
+
+          if [ -z "${MONITORING_EMAIL}" ] || [ "${MONITORING_EMAIL}" = "None" ]
+          then
+            echo "ERROR: Monitoring email SSM parameter is empty."
+            exit 1
+          fi
+
+          echo "Monitoring email parameter found."
+
+          echo "notification_email=${MONITORING_EMAIL}" >> "$GITHUB_OUTPUT"
 
 
       # =========================================================
@@ -112,7 +147,7 @@ jobs:
             --template-file "${TEMPLATE_FILE}" \
             --parameter-overrides \
               Environment="${ENVIRONMENT}" \
-              NotificationEmail="${{ inputs.notification_email }}" \
+              NotificationEmail="${{ steps.monitoring-email.outputs.notification_email }}" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "${AWS_REGION}"
 
