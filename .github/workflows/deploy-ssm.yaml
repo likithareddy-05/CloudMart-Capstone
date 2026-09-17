@@ -2,6 +2,15 @@ name: Deploy SSM Parameters
 
 on:
   workflow_dispatch:
+    inputs:
+      order_email:
+        description: "Order notification email (enter only on first setup or when changing it)"
+        required: false
+        type: string
+      low_stock_email:
+        description: "Low-stock notification email (enter only on first setup or when changing it)"
+        required: false
+        type: string
 
 permissions:
   id-token: write
@@ -214,6 +223,7 @@ jobs:
 
           echo "DB password SecureString created/updated."
 
+
       # =====================================================
       # 10. CREATE USER ID PARAMETER
       # =====================================================
@@ -249,55 +259,109 @@ jobs:
 
 
       # =========================================================
-      # ORDER EMAIL SSM PARAMETER
+      # 12. CREATE / PRESERVE ORDER EMAIL PARAMETER
+      # =========================================================
+      #
+      # First run:
+      #   Enter the email in the workflow input.
+      #   The value is stored in SSM Parameter Store.
+      #
+      # Later runs:
+      #   Leave the input blank and the existing SSM value is preserved.
+      #
+      # To change the email:
+      #   Enter the new email when manually running this workflow.
+      #
+      # The email value is never printed in the GitHub Actions log.
       # =========================================================
 
-      - name: Create Order Email Parameter
+      - name: Create or preserve Order Email Parameter
         env:
-          ORDER_EMAIL: ${{ secrets.ORDER_EMAIL }}
+          ORDER_EMAIL_INPUT: ${{ inputs.order_email }}
+
         run: |
 
-          if [ -z "$ORDER_EMAIL" ]; then
-            echo "ERROR: ORDER_EMAIL GitHub secret is missing."
-            exit 1
+          PARAM_NAME="/cloudmart/$ENVIRONMENT/notifications/order-email"
+
+          if [ -n "$ORDER_EMAIL_INPUT" ]; then
+            echo "Order email input supplied. Creating/updating SSM parameter..."
+
+            aws ssm put-parameter \
+              --name "$PARAM_NAME" \
+              --type "String" \
+              --value "$ORDER_EMAIL_INPUT" \
+              --overwrite \
+              --region "$AWS_REGION"
+
+            echo "Order email SSM parameter created/updated."
+          else
+            if aws ssm get-parameter \
+              --name "$PARAM_NAME" \
+              --region "$AWS_REGION" \
+              >/dev/null 2>&1; then
+
+              echo "Order email SSM parameter already exists. Keeping existing value."
+            else
+              echo "ERROR: Order email parameter does not exist."
+              echo "Enter order_email when manually running Deploy SSM for the first setup."
+              exit 1
+            fi
           fi
 
-          aws ssm put-parameter \
-            --name "/cloudmart/$ENVIRONMENT/notifications/order-email" \
-            --type "String" \
-            --value "$ORDER_EMAIL" \
-            --overwrite \
-            --region "$AWS_REGION"
-
-          echo "Order email SSM parameter created/updated."
-
 
       # =========================================================
-      # LOW STOCK EMAIL SSM PARAMETER
+      # 13. CREATE / PRESERVE LOW STOCK EMAIL PARAMETER
+      # =========================================================
+      #
+      # First run:
+      #   Enter the email in the workflow input.
+      #   The value is stored in SSM Parameter Store.
+      #
+      # Later runs:
+      #   Leave the input blank and the existing SSM value is preserved.
+      #
+      # To change the email:
+      #   Enter the new email when manually running this workflow.
+      #
+      # The email value is never printed in the GitHub Actions log.
       # =========================================================
 
-      - name: Create Low Stock Email Parameter
+      - name: Create or preserve Low Stock Email Parameter
         env:
-          LOW_STOCK_EMAIL: ${{ secrets.LOW_STOCK_EMAIL }}
+          LOW_STOCK_EMAIL_INPUT: ${{ inputs.low_stock_email }}
+
         run: |
 
-          if [ -z "$LOW_STOCK_EMAIL" ]; then
-            echo "ERROR: LOW_STOCK_EMAIL GitHub secret is missing."
-            exit 1
+          PARAM_NAME="/cloudmart/$ENVIRONMENT/notifications/low-stock-email"
+
+          if [ -n "$LOW_STOCK_EMAIL_INPUT" ]; then
+            echo "Low-stock email input supplied. Creating/updating SSM parameter..."
+
+            aws ssm put-parameter \
+              --name "$PARAM_NAME" \
+              --type "String" \
+              --value "$LOW_STOCK_EMAIL_INPUT" \
+              --overwrite \
+              --region "$AWS_REGION"
+
+            echo "Low-stock email SSM parameter created/updated."
+          else
+            if aws ssm get-parameter \
+              --name "$PARAM_NAME" \
+              --region "$AWS_REGION" \
+              >/dev/null 2>&1; then
+
+              echo "Low-stock email SSM parameter already exists. Keeping existing value."
+            else
+              echo "ERROR: Low-stock email parameter does not exist."
+              echo "Enter low_stock_email when manually running Deploy SSM for the first setup."
+              exit 1
+            fi
           fi
-
-          aws ssm put-parameter \
-            --name "/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
-            --type "String" \
-            --value "$LOW_STOCK_EMAIL" \
-            --overwrite \
-            --region "$AWS_REGION"
-
-          echo "Low stock email SSM parameter created/updated."
 
 
       # =====================================================
-      # 12. VERIFY SSM PARAMETERS
+      # 14. VERIFY SSM PARAMETERS
       # =====================================================
       #
       # Only parameter names/types are displayed.
@@ -326,6 +390,18 @@ jobs:
           aws ssm describe-parameters \
             --parameter-filters \
               "Key=Name,Option=BeginsWith,Values=/cloudmart/$ENVIRONMENT/auth/" \
+            --region "$AWS_REGION" \
+            --query "Parameters[].{Name:Name,Type:Type}" \
+            --output table
+
+
+          echo "=========================================="
+          echo "NOTIFICATION SSM PARAMETERS"
+          echo "=========================================="
+
+          aws ssm describe-parameters \
+            --parameter-filters \
+              "Key=Name,Option=BeginsWith,Values=/cloudmart/$ENVIRONMENT/notifications/" \
             --region "$AWS_REGION" \
             --query "Parameters[].{Name:Name,Type:Type}" \
             --output table
