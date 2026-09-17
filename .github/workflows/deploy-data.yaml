@@ -127,8 +127,6 @@ jobs:
       - name: Create Data Stack
         if: steps.stack.outputs.exists == 'false'
 
-        env:
-          DB_PASSWORD: ${{ secrets.CLOUDMART_DB_PASSWORD }}
 
         run: |
 
@@ -141,7 +139,6 @@ jobs:
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
               ParameterKey=DBName,ParameterValue="cloudmart" \
               ParameterKey=DBUsername,ParameterValue="cloudmartadmin" \
-              ParameterKey=DBPassword,ParameterValue="$DB_PASSWORD" \
             --region "$AWS_REGION"
 
           echo "Data Stack creation started."
@@ -213,8 +210,6 @@ jobs:
       - name: Create Data Change Set
         if: steps.stack.outputs.exists == 'true'
 
-        env:
-          DB_PASSWORD: ${{ secrets.CLOUDMART_DB_PASSWORD }}
 
         run: |
 
@@ -232,7 +227,6 @@ jobs:
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
               ParameterKey=DBName,ParameterValue="cloudmart" \
               ParameterKey=DBUsername,ParameterValue="cloudmartadmin" \
-              ParameterKey=DBPassword,ParameterValue="$DB_PASSWORD" \
             --region "$AWS_REGION"
 
 

@@ -1,6 +1,7 @@
 import json
 import os
 import hashlib
+import traceback
 
 import boto3
 import pymysql
@@ -11,6 +12,18 @@ import pymysql
 # =========================================================
 
 ssm = boto3.client("ssm")
+
+
+def log_error(event_name, error, **kwargs):
+    """Write structured CloudWatch error logs without logging secrets/tokens."""
+    log_data = {
+        "event": event_name,
+        "error_type": type(error).__name__,
+        "error": str(error)
+    }
+    log_data.update(kwargs)
+    print(json.dumps(log_data))
+    traceback.print_exc()
 
 
 # =========================================================
@@ -29,12 +42,19 @@ DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
 # =========================================================
 
 def get_parameter(parameter_name):
-    response = ssm.get_parameter(
-        Name=parameter_name,
-        WithDecryption=True
-    )
-
-    return response["Parameter"]["Value"]
+    try:
+        response = ssm.get_parameter(
+            Name=parameter_name,
+            WithDecryption=True
+        )
+        return response["Parameter"]["Value"]
+    except Exception as error:
+        log_error(
+            "ssm_parameter_fetch_failed",
+            error,
+            parameter_name=parameter_name
+        )
+        raise
 
 
 # =========================================================
@@ -42,23 +62,39 @@ def get_parameter(parameter_name):
 # =========================================================
 
 def get_db_connection():
-    host = get_parameter(DB_HOST_PARAMETER)
-    port = int(get_parameter(DB_PORT_PARAMETER))
-    database = get_parameter(DB_NAME_PARAMETER)
-    username = get_parameter(DB_USERNAME_PARAMETER)
-    password = get_parameter(DB_PASSWORD_PARAMETER)
+    try:
+        host = get_parameter(DB_HOST_PARAMETER)
+        port = int(get_parameter(DB_PORT_PARAMETER))
+        database = get_parameter(DB_NAME_PARAMETER)
+        username = get_parameter(DB_USERNAME_PARAMETER)
+        password = get_parameter(DB_PASSWORD_PARAMETER)
+    except Exception as error:
+        log_error(
+            "database_credentials_fetch_failed",
+            error,
+            parameter_group="DB_*_PARAMETER"
+        )
+        raise
 
-    return pymysql.connect(
-        host=host,
-        port=port,
-        user=username,
-        password=password,
-        database=database,
-        connect_timeout=5,
-        read_timeout=5,
-        write_timeout=5,
-        cursorclass=pymysql.cursors.DictCursor
-    )
+    try:
+        return pymysql.connect(
+            host=host,
+            port=port,
+            user=username,
+            password=password,
+            database=database,
+            connect_timeout=5,
+            read_timeout=5,
+            write_timeout=5,
+            cursorclass=pymysql.cursors.DictCursor
+        )
+    except Exception as error:
+        log_error(
+            "rds_connection_failed",
+            error,
+            database=database
+        )
+        raise
 
 
 # =========================================================
@@ -83,25 +119,38 @@ def get_user_by_token(provided_token):
     try:
         connection = get_db_connection()
 
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                """
-                SELECT
-                    user_id,
-                    role
-                FROM users
-                WHERE token_hash = %s
-                LIMIT 1
-                """,
-                (token_hash,)
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                        user_id,
+                        role
+                    FROM users
+                    WHERE token_hash = %s
+                    LIMIT 1
+                    """,
+                    (token_hash,)
+                )
+                return cursor.fetchone()
+        except Exception as error:
+            # Never log the raw token or token hash.
+            log_error(
+                "user_token_lookup_failed",
+                error,
+                operation="user_token_database_lookup"
             )
-
-            return cursor.fetchone()
+            raise
 
     finally:
         if connection:
-            connection.close()
+            try:
+                connection.close()
+            except Exception as error:
+                log_error(
+                    "database_connection_close_failed",
+                    error
+                )
 
 
 # =========================================================
@@ -222,6 +271,10 @@ def lambda_handler(event, context):
         # GET METHOD ARN
         # =================================================
 
+        print(json.dumps({
+            "event": "authorization_request_received"
+        }))
+
         method_arn = event.get(
             "methodArn"
         )
@@ -267,6 +320,11 @@ def lambda_handler(event, context):
         # =================================================
         # FIND USER IN RDS
         # =================================================
+
+        print(json.dumps({
+            "event": "user_token_lookup_started",
+            "method": http_method
+        }))
 
         user = get_user_by_token(
             provided_token
@@ -422,9 +480,10 @@ def lambda_handler(event, context):
 
     except Exception as error:
 
-        print(json.dumps({
-            "event": "authorization_error",
-            "reason": "authorization_failed"
-        }))
+        log_error(
+            "authorization_error",
+            error,
+            reason="authorization_failed"
+        )
 
         raise Exception("Unauthorized")

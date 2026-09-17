@@ -28,9 +28,6 @@ Parameters:
     Default: cloudmartadmin
 
 
-  DBPassword:
-    Type: String
-    NoEcho: true
 
 
 # =========================================================
@@ -153,7 +150,7 @@ Resources:
       # ---------------------------------------------------
 
       MasterUserPassword:
-        !Ref DBPassword
+        !Sub '{{resolve:ssm-secure:/cloudmart/${Environment}/db/password}}'
 
 
       # ---------------------------------------------------

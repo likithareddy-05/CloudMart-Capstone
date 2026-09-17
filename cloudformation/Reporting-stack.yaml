@@ -113,6 +113,9 @@ Resources:
   ReportGeneratorLambda:
     Type: AWS::Lambda::Function
 
+    DependsOn:
+      - ReportGeneratorLogGroup
+
     Properties:
 
       FunctionName:
@@ -207,6 +210,23 @@ Resources:
 
 
   # ============================================================
+  # REPORT GENERATOR LAMBDA CLOUDWATCH LOG GROUP
+  # ============================================================
+
+  ReportGeneratorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        !Sub /aws/lambda/CloudMart-${Environment}-ReportGenerator
+      RetentionInDays: 14
+      Tags:
+        - Key: Project
+          Value: CloudMart
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # ============================================================
   # EVENTBRIDGE DAILY REPORT SCHEDULE
   # ============================================================
 
@@ -233,11 +253,73 @@ Resources:
 
       Targets:
 
+        # --------------------------------------------------------
+        # TARGET 1 - REPORT GENERATOR LAMBDA
+        # --------------------------------------------------------
+
         - Arn:
             !GetAtt ReportGeneratorLambda.Arn
 
           Id:
             ReportGeneratorTarget
+
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 3
+
+        # --------------------------------------------------------
+        # TARGET 2 - CLOUDWATCH LOGS
+        # --------------------------------------------------------
+
+        - Arn:
+            !GetAtt ReportingEventBridgeLogGroup.Arn
+
+          Id:
+            ReportingEventBridgeLogTarget
+
+
+  # ============================================================
+  # EVENTBRIDGE CLOUDWATCH LOG GROUP
+  # ============================================================
+
+  ReportingEventBridgeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        !Sub /aws/events/CloudMart-${Environment}-Reporting
+      RetentionInDays: 14
+      Tags:
+        - Key: Project
+          Value: CloudMart
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # ============================================================
+  # ALLOW EVENTBRIDGE TO WRITE TO CLOUDWATCH LOGS
+  # ============================================================
+
+  ReportingEventBridgeLogPolicy:
+    Type: AWS::Logs::ResourcePolicy
+    Properties:
+      PolicyName:
+        !Sub CloudMart-${Environment}-ReportingEventBridgeLogsPolicy
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - events.amazonaws.com
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              !Sub ${ReportingEventBridgeLogGroup.Arn}:*
+            Condition:
+              StringEquals:
+                aws:SourceAccount:
+                  !Ref AWS::AccountId
 
 
   # ============================================================

@@ -1,5 +1,6 @@
 import json
 import os
+import traceback
 
 import boto3
 import pymysql
@@ -32,18 +33,49 @@ def log_event(event_name, **kwargs):
     )
 
 
+def log_error(event_name, error, **kwargs):
+
+    log_data = {
+        "event": event_name,
+        "error_type": type(error).__name__,
+        "error": str(error),
+        **kwargs
+    }
+
+    print(
+        json.dumps(
+            log_data,
+            default=str
+        )
+    )
+
+    print(traceback.format_exc())
+
+
 # =========================================================
 # GET PARAMETER FROM SSM
 # =========================================================
 
 def get_parameter(name):
 
-    response = ssm.get_parameter(
-        Name=name,
-        WithDecryption=True
-    )
+    try:
 
-    return response["Parameter"]["Value"]
+        response = ssm.get_parameter(
+            Name=name,
+            WithDecryption=True
+        )
+
+        return response["Parameter"]["Value"]
+
+    except Exception as error:
+
+        log_error(
+            "ssm_parameter_fetch_failed",
+            error,
+            parameter_name=name
+        )
+
+        raise
 
 
 # =========================================================
@@ -59,30 +91,42 @@ def get_database_credentials():
 
     prefix = f"/cloudmart/{environment}/db"
 
-    return {
+    try:
 
-        "host": get_parameter(
-            f"{prefix}/host"
-        ),
+        return {
 
-        "port": int(
-            get_parameter(
-                f"{prefix}/port"
+            "host": get_parameter(
+                f"{prefix}/host"
+            ),
+
+            "port": int(
+                get_parameter(
+                    f"{prefix}/port"
+                )
+            ),
+
+            "database": get_parameter(
+                f"{prefix}/name"
+            ),
+
+            "username": get_parameter(
+                f"{prefix}/username"
+            ),
+
+            "password": get_parameter(
+                f"{prefix}/password"
             )
-        ),
+        }
 
-        "database": get_parameter(
-            f"{prefix}/name"
-        ),
+    except Exception as error:
 
-        "username": get_parameter(
-            f"{prefix}/username"
-        ),
-
-        "password": get_parameter(
-            f"{prefix}/password"
+        log_error(
+            "database_credentials_fetch_failed",
+            error,
+            parameter_prefix=prefix
         )
-    }
+
+        raise
 
 
 # =========================================================
@@ -91,28 +135,39 @@ def get_database_credentials():
 
 def get_connection():
 
-    db = get_database_credentials()
+    try:
 
-    return pymysql.connect(
+        db = get_database_credentials()
 
-        host=db["host"],
+        return pymysql.connect(
 
-        port=db["port"],
+            host=db["host"],
 
-        user=db["username"],
+            port=db["port"],
 
-        password=db["password"],
+            user=db["username"],
 
-        database=db["database"],
+            password=db["password"],
 
-        cursorclass=pymysql.cursors.DictCursor,
+            database=db["database"],
 
-        connect_timeout=10,
+            cursorclass=pymysql.cursors.DictCursor,
 
-        read_timeout=30,
+            connect_timeout=10,
 
-        write_timeout=30
-    )
+            read_timeout=30,
+
+            write_timeout=30
+        )
+
+    except Exception as error:
+
+        log_error(
+            "rds_connection_failed",
+            error
+        )
+
+        raise
 
 
 # =========================================================
@@ -145,29 +200,43 @@ def publish_inventory_event(
             low_stock_threshold
     }
 
-    response = events.put_events(
+    try:
 
-        Entries=[
+        response = events.put_events(
 
-            {
+            Entries=[
 
-                "EventBusName":
-                    event_bus_name,
+                {
 
-                "Source":
-                    "cloudmart.product",
+                    "EventBusName":
+                        event_bus_name,
 
-                "DetailType":
-                    "InventoryUpdated",
+                    "Source":
+                        "cloudmart.product",
 
-                "Detail":
-                    json.dumps(
-                        event_detail,
-                        default=str
-                    )
-            }
-        ]
-    )
+                    "DetailType":
+                        "InventoryUpdated",
+
+                    "Detail":
+                        json.dumps(
+                            event_detail,
+                            default=str
+                        )
+                }
+            ]
+        )
+
+    except Exception as error:
+
+        log_error(
+            "inventory_event_publish_error",
+            error,
+            product_id=product_id,
+            event_bus=event_bus_name,
+            detail_type="InventoryUpdated"
+        )
+
+        raise
 
     if response["FailedEntryCount"] > 0:
 
@@ -511,6 +580,13 @@ def lambda_handler(
 
                 # ADMIN -> ACTIVE + DELETED PRODUCT
 
+                log_event(
+                    "product_query_started",
+                    operation="get_product_by_id",
+                    product_id=product_id,
+                    role=user_role
+                )
+
                 if user_role == "ADMIN":
 
                     cursor.execute(
@@ -597,6 +673,10 @@ def lambda_handler(
             # =================================================
 
             if http_method == "POST":
+
+                log_event(
+                    "create_product_started"
+                )
 
                 body = get_request_body(
                     event
@@ -817,6 +897,10 @@ def lambda_handler(
                 # INSERT PRODUCT
                 # =================================================
 
+                log_event(
+                    "product_insert_started"
+                )
+
                 cursor.execute(
 
                     """
@@ -854,6 +938,11 @@ def lambda_handler(
                 # INSERT INVENTORY
                 # =================================================
 
+                log_event(
+                    "inventory_insert_started",
+                    product_id=new_product_id
+                )
+
                 cursor.execute(
 
                     """
@@ -883,7 +972,15 @@ def lambda_handler(
                 # COMMIT
                 # =================================================
 
-                connection.commit()
+                try:
+                    connection.commit()
+                except Exception as error:
+                    log_error(
+                        "product_create_commit_failed",
+                        error,
+                        product_id=new_product_id
+                    )
+                    raise
 
 
                 # =================================================
@@ -960,6 +1057,11 @@ def lambda_handler(
                 http_method == "PUT"
                 and product_id
             ):
+
+                log_event(
+                    "update_product_started",
+                    product_id=product_id
+                )
 
                 body = get_request_body(
                     event
@@ -1320,6 +1422,11 @@ def lambda_handler(
                     # CHECK INVENTORY EXISTS
                     # =================================================
 
+                    log_event(
+                        "inventory_query_started",
+                        product_id=product_id
+                    )
+
                     cursor.execute(
 
                         """
@@ -1366,6 +1473,11 @@ def lambda_handler(
                     # =================================================
                     # UPDATE INVENTORY
                     # =================================================
+
+                    log_event(
+                        "inventory_update_started",
+                        product_id=product_id
+                    )
 
                     inventory_fields = []
 
@@ -1512,7 +1624,15 @@ def lambda_handler(
                 # COMMIT
                 # =================================================
 
-                connection.commit()
+                try:
+                    connection.commit()
+                except Exception as error:
+                    log_error(
+                        "product_update_commit_failed",
+                        error,
+                        product_id=product_id
+                    )
+                    raise
 
 
                 # =================================================
@@ -1600,6 +1720,11 @@ def lambda_handler(
                 and product_id
             ):
 
+                log_event(
+                    "delete_product_started",
+                    product_id=product_id
+                )
+
                 # First check product exists
                 cursor.execute(
 
@@ -1647,6 +1772,11 @@ def lambda_handler(
                 # SOFT DELETE
                 # =================================================
 
+                log_event(
+                    "product_soft_delete_started",
+                    product_id=product_id
+                )
+
                 cursor.execute(
 
                     """
@@ -1661,7 +1791,15 @@ def lambda_handler(
                 )
 
 
-                connection.commit()
+                try:
+                    connection.commit()
+                except Exception as error:
+                    log_error(
+                        "product_delete_commit_failed",
+                        error,
+                        product_id=product_id
+                    )
+                    raise
 
 
                 log_event(
@@ -1730,7 +1868,13 @@ def lambda_handler(
 
         if connection:
 
-            connection.rollback()
+            try:
+                connection.rollback()
+            except Exception as rollback_error:
+                log_error(
+                    "database_rollback_failed",
+                    rollback_error
+                )
 
         return create_response(
 
@@ -1760,7 +1904,13 @@ def lambda_handler(
 
         if connection:
 
-            connection.rollback()
+            try:
+                connection.rollback()
+            except Exception as rollback_error:
+                log_error(
+                    "database_rollback_failed",
+                    rollback_error
+                )
 
         return create_response(
 
@@ -1779,12 +1929,11 @@ def lambda_handler(
 
     except Exception as error:
 
-        log_event(
-
+        log_error(
             "product_request_failed",
-
-            error=str(error),
-
+            error,
+            method=http_method if "http_method" in locals() else None,
+            product_id=product_id if "product_id" in locals() else None,
             status="failed"
         )
 
@@ -1811,4 +1960,10 @@ def lambda_handler(
 
         if connection:
 
-            connection.close()
+            try:
+                connection.close()
+            except Exception as error:
+                log_error(
+                    "database_connection_close_failed",
+                    error
+                )

@@ -40,9 +40,10 @@ Parameters:
 
   LowStockEmail:
     Type: String
+    Default: /cloudmart/dev/monitoring/email
 
     Description: >
-      Email address for CloudMart low-stock alerts.
+      SSM parameter containing the email address for CloudMart low-stock alerts.
 
 
   # =======================================================
@@ -71,9 +72,10 @@ Parameters:
 
   OrderEmail:
     Type: String
+    Default: /cloudmart/dev/monitoring/email
 
     Description: >
-      Email address for CloudMart order notifications.
+      SSM parameter containing the email address for CloudMart order notifications.
 
 
 # =========================================================
@@ -95,6 +97,62 @@ Resources:
 
       Name:
         !Sub CloudMart-${Environment}-EventBus
+
+
+  # =======================================================
+  # EVENTBRIDGE CLOUDWATCH LOG GROUP
+  # =======================================================
+
+  EventBridgeLogGroup:
+
+    Type: AWS::Logs::LogGroup
+
+    Properties:
+
+      LogGroupName:
+        !Sub /aws/events/CloudMart-${Environment}
+
+      RetentionInDays: 14
+
+      Tags:
+        - Key: Project
+          Value: CloudMart
+
+        - Key: Environment
+          Value: !Ref Environment
+
+
+  # =======================================================
+  # EVENTBRIDGE CLOUDWATCH LOG RESOURCE POLICY
+  # =======================================================
+
+  EventBridgeLogResourcePolicy:
+
+    Type: AWS::Logs::ResourcePolicy
+
+    Properties:
+
+      PolicyName:
+        !Sub CloudMart-${Environment}-EventBridgeLogPolicy
+
+      PolicyDocument:
+        Version: '2012-10-17'
+
+        Statement:
+          - Sid: AllowEventBridgeToWriteLogs
+
+            Effect: Allow
+
+            Principal:
+              Service:
+                - events.amazonaws.com
+
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+
+            Resource:
+              !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/events/CloudMart-${Environment}:*
 
 
   # =======================================================
@@ -249,6 +307,16 @@ Resources:
 
           Arn:
             !GetAtt InventoryAlertLambda.Arn
+        - Id:
+            InventoryAlertLambdaLogTarget
+
+          Arn:
+            !GetAtt EventBridgeLogGroup.Arn
+
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 3
+
 
 
   # =======================================================
@@ -482,6 +550,16 @@ Resources:
 
             InputTemplate: |
               "CloudMart Order Notification\n\nOrder ID: <orderId>\nCustomer Email: <customerEmail>\nStatus: <status>\nTotal Amount: <totalAmount>\n\nYour order has been confirmed successfully."
+        - Id:
+            OrderConfirmedLogTarget
+
+          Arn:
+            !GetAtt EventBridgeLogGroup.Arn
+
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 3
+
 
 
   # =======================================================
@@ -542,6 +620,17 @@ Resources:
 
             InputTemplate: |
               "CloudMart Order Notification\n\nOrder ID: <orderId>\nCustomer ID: <customerId>\nStatus: <status>\nTotal Amount: <totalAmount>\n\nOrder could not be processed.\n\nReason: <reason>"
+        - Id:
+            OrderFailedLogTarget
+
+          Arn:
+            !GetAtt EventBridgeLogGroup.Arn
+
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 3
+
+
 
   # =======================================================
   # EVENTBRIDGE → ORDER CANCELLED → SNS
@@ -601,6 +690,16 @@ Resources:
 
             InputTemplate: |
               "CloudMart Order Notification\n\nOrder ID: <orderId>\nCustomer ID: <customerId>\nPrevious Status: <previousStatus>\nStatus: <status>\nTotal Amount: <totalAmount>\n\nYour order has been cancelled successfully.\n\nThe inventory has been restored."
+        - Id:
+            OrderCancelledLogTarget
+
+          Arn:
+            !GetAtt EventBridgeLogGroup.Arn
+
+          RetryPolicy:
+            MaximumEventAgeInSeconds: 3600
+            MaximumRetryAttempts: 3
+
 
 
   # =======================================================

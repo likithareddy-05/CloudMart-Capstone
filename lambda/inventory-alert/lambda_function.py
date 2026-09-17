@@ -1,6 +1,7 @@
 import json
 import os
 import boto3
+import traceback
 
 
 # =========================================================
@@ -37,6 +38,33 @@ def log_event(event_name, **details):
     )
 
 
+def log_error(event_name, error, **details):
+
+    log_data = {
+        "event": event_name,
+        "error_type": type(error).__name__,
+        "error": str(error),
+        **details
+    }
+
+    print(
+        json.dumps(
+            log_data,
+            default=str
+        )
+    )
+
+    print(
+        json.dumps(
+            {
+                "event": f"{event_name}_traceback",
+                "traceback": traceback.format_exc()
+            },
+            default=str
+        )
+    )
+
+
 # =========================================================
 # LAMBDA HANDLER
 # =========================================================
@@ -59,6 +87,11 @@ def lambda_handler(event, context):
             {}
         )
 
+        log_event(
+            "inventory_alert_event_detail_parsed",
+            has_detail=isinstance(detail, dict)
+        )
+
         product_id = detail.get(
             "product_id"
         )
@@ -73,6 +106,14 @@ def lambda_handler(event, context):
 
         low_stock_threshold = detail.get(
             "low_stock_threshold"
+        )
+
+        log_event(
+            "inventory_alert_event_values_extracted",
+            product_id=product_id,
+            product_name=product_name,
+            stock_count=stock_count,
+            low_stock_threshold=low_stock_threshold
         )
 
 
@@ -100,12 +141,32 @@ def lambda_handler(event, context):
                 "Missing low_stock_threshold in event"
             )
 
+        log_event(
+            "inventory_alert_event_validated",
+            product_id=product_id,
+            status="success"
+        )
+
 
         # =================================================
         # LOW STOCK CHECK
         # =================================================
 
+        log_event(
+            "inventory_threshold_check_started",
+            product_id=product_id,
+            stock_count=stock_count,
+            low_stock_threshold=low_stock_threshold
+        )
+
         if stock_count <= low_stock_threshold:
+
+            log_event(
+                "low_stock_condition_detected",
+                product_id=product_id,
+                stock_count=stock_count,
+                low_stock_threshold=low_stock_threshold
+            )
 
             subject = (
                 "CloudMart Low Stock Alert"
@@ -131,19 +192,45 @@ def lambda_handler(event, context):
             # SEND SNS NOTIFICATION
             # =============================================
 
-            response = sns.publish(
+            log_event(
+                "sns_publish_started",
+                product_id=product_id,
+                topic_arn=SNS_TOPIC_ARN
+            )
 
-                TopicArn=SNS_TOPIC_ARN,
+            try:
+                response = sns.publish(
+                    TopicArn=SNS_TOPIC_ARN,
+                    Subject=subject,
+                    Message=message
+                )
+            except Exception as sns_error:
+                log_error(
+                    "sns_publish_failed",
+                    sns_error,
+                    product_id=product_id,
+                    topic_arn=SNS_TOPIC_ARN
+                )
+                raise
 
-                Subject=subject,
-
-                Message=message
+            log_event(
+                "sns_publish_succeeded",
+                product_id=product_id,
+                message_id=response.get("MessageId"),
+                status="success"
             )
 
 
             # =============================================
             # PUBLISH INVENTORY ALERT METRIC
             # =============================================
+
+            log_event(
+                "inventory_alert_metric_publish_started",
+                product_id=product_id,
+                metric_name="InventoryAlerts",
+                namespace="CloudMart"
+            )
 
             try:
 
@@ -182,18 +269,18 @@ def lambda_handler(event, context):
 
             except Exception as metric_error:
 
-                log_event(
-
+                log_error(
                     "inventory_alert_metric_failed",
-
+                    metric_error,
                     product_id=product_id,
-
                     product_name=product_name,
-
-                    error=str(metric_error),
-
+                    metric_name="InventoryAlerts",
+                    namespace="CloudMart",
                     status="failed"
                 )
+
+                # Metric failure should not undo a successfully
+                # sent SNS notification.
 
 
             # =============================================
@@ -212,9 +299,9 @@ def lambda_handler(event, context):
 
                 low_stock_threshold=low_stock_threshold,
 
-                sns_message_id=response[
+                sns_message_id=response.get(
                     "MessageId"
-                ],
+                ),
 
                 status="success"
             )
@@ -278,12 +365,13 @@ def lambda_handler(event, context):
 
     except Exception as error:
 
-        log_event(
-
+        log_error(
             "inventory_alert_failed",
-
-            error=str(error),
-
+            error,
+            product_id=locals().get("product_id"),
+            product_name=locals().get("product_name"),
+            stock_count=locals().get("stock_count"),
+            low_stock_threshold=locals().get("low_stock_threshold"),
             status="failed"
         )
 

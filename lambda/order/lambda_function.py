@@ -1,5 +1,6 @@
 import json
 import os
+import traceback
 
 import boto3
 import pymysql
@@ -12,6 +13,24 @@ import pymysql
 ssm = boto3.client("ssm")
 events_client = boto3.client("events")
 cloudwatch = boto3.client("cloudwatch")
+
+def log_error(event_name, error, **kwargs):
+    """
+    Write a structured CloudWatch error log.
+
+    Never pass raw authorization tokens, passwords, token hashes,
+    or other secrets through kwargs.
+    """
+    log_data = {
+        "event": event_name,
+        "error_type": type(error).__name__,
+        "error": str(error)
+    }
+    log_data.update(kwargs)
+
+    print(json.dumps(log_data))
+    traceback.print_exc()
+
 
 
 # =========================================================
@@ -40,12 +59,21 @@ def get_parameter(name):
     such as the database password to be decrypted.
     """
 
-    response = ssm.get_parameter(
-        Name=name,
-        WithDecryption=True
-    )
+    try:
+        response = ssm.get_parameter(
+            Name=name,
+            WithDecryption=True
+        )
 
-    return response["Parameter"]["Value"]
+        return response["Parameter"]["Value"]
+
+    except Exception as error:
+        log_error(
+            "ssm_parameter_fetch_failed",
+            error,
+            parameter_name=name
+        )
+        raise
 
 
 # =========================================================
@@ -66,29 +94,38 @@ def get_database_credentials():
 
     prefix = f"/cloudmart/{ENVIRONMENT}/db"
 
-    return {
-        "host": get_parameter(
-            f"{prefix}/host"
-        ),
+    try:
+        return {
+            "host": get_parameter(
+                f"{prefix}/host"
+            ),
 
-        "port": int(
-            get_parameter(
-                f"{prefix}/port"
+            "port": int(
+                get_parameter(
+                    f"{prefix}/port"
+                )
+            ),
+
+            "database": get_parameter(
+                f"{prefix}/name"
+            ),
+
+            "username": get_parameter(
+                f"{prefix}/username"
+            ),
+
+            "password": get_parameter(
+                f"{prefix}/password"
             )
-        ),
+        }
 
-        "database": get_parameter(
-            f"{prefix}/name"
-        ),
-
-        "username": get_parameter(
-            f"{prefix}/username"
-        ),
-
-        "password": get_parameter(
-            f"{prefix}/password"
+    except Exception as error:
+        log_error(
+            "database_credentials_fetch_failed",
+            error,
+            parameter_prefix=prefix
         )
-    }
+        raise
 
 
 # =========================================================
@@ -106,18 +143,28 @@ def get_connection():
 
     db = get_database_credentials()
 
-    return pymysql.connect(
-        host=db["host"],
-        port=db["port"],
-        user=db["username"],
-        password=db["password"],
-        database=db["database"],
-        connect_timeout=10,
-        read_timeout=30,
-        write_timeout=30,
-        cursorclass=pymysql.cursors.DictCursor,
-        autocommit=False
-    )
+    try:
+        return pymysql.connect(
+            host=db["host"],
+            port=db["port"],
+            user=db["username"],
+            password=db["password"],
+            database=db["database"],
+            connect_timeout=10,
+            read_timeout=30,
+            write_timeout=30,
+            cursorclass=pymysql.cursors.DictCursor,
+            autocommit=False
+        )
+
+    except Exception as error:
+        log_error(
+            "rds_connection_failed",
+            error,
+            database=db["database"],
+            port=db["port"]
+        )
+        raise
 
 
 # =========================================================
@@ -219,27 +266,48 @@ def publish_event(
         "EventBusName": EVENT_BUS_NAME
     }
 
-    result = events_client.put_events(
-        Entries=[event_entry]
+    try:
+        result = events_client.put_events(
+            Entries=[event_entry]
+        )
+
+    except Exception as error:
+        log_error(
+            "eventbridge_publish_failed",
+            error,
+            detail_type=detail_type,
+            source=source,
+            event_bus=EVENT_BUS_NAME
+        )
+        raise
+
+    failed_entry_count = result.get(
+        "FailedEntryCount",
+        0
     )
 
     print(json.dumps({
         "event": "eventbridge_event_published",
         "detail_type": detail_type,
-        "failed_entry_count": result.get(
-            "FailedEntryCount",
-            0
-        )
+        "failed_entry_count": failed_entry_count
     }))
 
-    if result.get(
-        "FailedEntryCount",
-        0
-    ) > 0:
+    if failed_entry_count > 0:
 
-        raise Exception(
+        error = RuntimeError(
             f"EventBridge failed to publish {detail_type}"
         )
+
+        log_error(
+            "eventbridge_event_rejected",
+            error,
+            detail_type=detail_type,
+            source=source,
+            event_bus=EVENT_BUS_NAME,
+            failed_entry_count=failed_entry_count
+        )
+
+        raise error
 
 
 # =========================================================
@@ -315,6 +383,11 @@ def create_order(
     inventory_updates = []
 
     try:
+
+        print(json.dumps({
+            "event": "create_order_started",
+            "customer_id": customer_id
+        }))
 
         # =================================================
         # READ REQUEST BODY
@@ -1437,6 +1510,12 @@ def cancel_order(
 
     try:
 
+        print(json.dumps({
+            "event": "cancel_order_started",
+            "user_id": authenticated_user.get("user_id"),
+            "role": authenticated_user.get("role")
+        }))
+
         # =================================================
         # GET ORDER ID
         # =================================================
@@ -1749,11 +1828,12 @@ def cancel_order(
 
             except Exception as metric_error:
 
-                print(json.dumps({
-                    "event": "orders_cancelled_metric_error",
-                    "order_id": order_id,
-                    "error": str(metric_error)
-                }))
+                log_error(
+                    "orders_cancelled_metric_error",
+                    metric_error,
+                    order_id=order_id,
+                    metric_name="OrdersCancelled"
+                )
 
 
 
@@ -1800,13 +1880,12 @@ def cancel_order(
 
         except Exception as event_error:
 
-            print(json.dumps({
-                "event":
-                    "order_cancelled_event_error",
-                "order_id": order_id,
-                "error":
-                    str(event_error)
-            }))
+            log_error(
+                "order_cancelled_event_error",
+                event_error,
+                order_id=order_id,
+                detail_type="OrderCancelled"
+            )
 
         # =================================================
         # PUBLISH INVENTORY UPDATED EVENTS
@@ -1833,16 +1912,13 @@ def cancel_order(
 
             except Exception as event_error:
 
-                print(json.dumps({
-                    "event":
-                        "inventory_updated_event_error",
-                    "order_id":
-                        order_id,
-                    "product_id":
-                        item["product_id"],
-                    "error":
-                        str(event_error)
-                }))
+                log_error(
+                    "inventory_updated_event_error",
+                    event_error,
+                    order_id=order_id,
+                    product_id=item["product_id"],
+                    detail_type="InventoryUpdated"
+                )
 
         # =================================================
         # RESPONSE
@@ -1869,17 +1945,18 @@ def cancel_order(
         if connection:
             try:
                 connection.rollback()
-            except Exception:
-                pass
+            except Exception as rollback_error:
+                log_error(
+                    "cancel_order_rollback_failed",
+                    rollback_error,
+                    order_id=locals().get("order_id")
+                )
 
-        print(json.dumps({
-            "event":
-                "cancel_order_failed",
-            "order_id":
-                locals().get("order_id"),
-            "error":
-                str(error)
-        }))
+        log_error(
+            "cancel_order_failed",
+            error,
+            order_id=locals().get("order_id")
+        )
 
         return response(
             500,
@@ -1892,7 +1969,13 @@ def cancel_order(
     finally:
 
         if connection:
-            connection.close()
+            try:
+                connection.close()
+            except Exception as close_error:
+                log_error(
+                    "database_connection_close_failed",
+                    close_error
+                )
 
 # =========================================================
 # GET ORDER BY ID
@@ -2154,6 +2237,12 @@ def get_orders(
     connection = None
 
     try:
+
+        print(json.dumps({
+            "event": "get_orders_started",
+            "user_id": authenticated_user.get("user_id"),
+            "role": authenticated_user.get("role")
+        }))
 
         # =================================================
         # GET QUERY PARAMETERS
