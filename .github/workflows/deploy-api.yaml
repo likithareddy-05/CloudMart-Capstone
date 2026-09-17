@@ -470,9 +470,9 @@ jobs:
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
               ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
               ParameterKey=InventoryAlertLambdaS3Key,ParameterValue="$INVENTORY_ALERT_S3_KEY" \
-              ParameterKey=LowStockEmail,ParameterValue="/cloudmart/dev/monitoring/email" \
+              ParameterKey=LowStockEmail,ParameterValue="/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
               ParameterKey=OrderLambdaS3Key,ParameterValue="$ORDER_LAMBDA_S3_KEY" \
-              ParameterKey=OrderEmail,ParameterValue="/cloudmart/dev/monitoring/email" \
+              ParameterKey=OrderEmail,ParameterValue="/cloudmart/$ENVIRONMENT/notifications/order-email" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"
 
@@ -519,9 +519,9 @@ jobs:
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
               ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
               ParameterKey=InventoryAlertLambdaS3Key,ParameterValue="$INVENTORY_ALERT_S3_KEY" \
-              ParameterKey=LowStockEmail,ParameterValue="/cloudmart/dev/monitoring/email" \
+              ParameterKey=LowStockEmail,ParameterValue="/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
               ParameterKey=OrderLambdaS3Key,ParameterValue="$ORDER_LAMBDA_S3_KEY" \
-              ParameterKey=OrderEmail,ParameterValue="/cloudmart/dev/monitoring/email" \
+              ParameterKey=OrderEmail,ParameterValue="/cloudmart/$ENVIRONMENT/notifications/order-email" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"
 
