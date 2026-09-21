@@ -13,20 +13,40 @@ env:
 
   STACK_NAME: cloudmart-dev-reporting
 
-  # Existing Lambda deployment bucket
+  # =====================================================
+  # EXISTING LAMBDA DEPLOYMENT BUCKET
+  # =====================================================
   LAMBDA_S3_BUCKET: cloudmart-dev-lambda-430155298316
 
-  # Existing Reports bucket
+  # =====================================================
+  # EXISTING REPORTS BUCKET
+  # =====================================================
   REPORTS_BUCKET: cloudmart-dev-reports-430155298316
 
-  # Dashboard files stored in the existing Reports bucket
+  # =====================================================
+  # DASHBOARD FILES
+  #
+  # Dashboard files are stored inside the existing
+  # Reports bucket under a separate prefix.
+  #
+  # reports/              -> existing daily reports
+  # cloudmart-dashboard/  -> dashboard application
+  # =====================================================
   DASHBOARD_S3_BUCKET: cloudmart-dev-reports-430155298316
   DASHBOARD_S3_PREFIX: cloudmart-dashboard
 
-  # Reporting Lambda source
+  # Dashboard source files in GitHub repository
+  DASHBOARD_APP_SOURCE: dashboard/app.py
+  DASHBOARD_INDEX_SOURCE: dashboard/index.html
+
+  # =====================================================
+  # REPORTING LAMBDA SOURCE
+  # =====================================================
   REPORT_LAMBDA_SOURCE: lambda/report/lambda_function.py
 
-  # SSM DB parameter names
+  # =====================================================
+  # SSM DB PARAMETER NAMES
+  # =====================================================
   DB_HOST_PARAMETER: /cloudmart/dev/db/host
   DB_PORT_PARAMETER: /cloudmart/dev/db/port
   DB_NAME_PARAMETER: /cloudmart/dev/db/name
@@ -56,38 +76,9 @@ jobs:
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
-
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-
-
-            # =====================================================
-      # UPLOAD DASHBOARD FILES
-      # =====================================================
-
-      - name: Upload Dashboard Files
-        run: |
-
-          echo "Uploading CloudMart dashboard files..."
-
-          test -f dashboard/app.py
-          test -f dashboard/index.html
-          test -f dashboard/login.html
-
-          aws s3 cp \
-            dashboard/app.py \
-            "s3://${DASHBOARD_S3_BUCKET}/${DASHBOARD_S3_PREFIX}/app.py"
-
-          aws s3 cp \
-            dashboard/index.html \
-            "s3://${DASHBOARD_S3_BUCKET}/${DASHBOARD_S3_PREFIX}/index.html"
-
-          aws s3 cp \
-            dashboard/login.html \
-            "s3://${DASHBOARD_S3_BUCKET}/${DASHBOARD_S3_PREFIX}/login.html"
-
-          echo "Dashboard files uploaded successfully."
 
 
       # =====================================================
@@ -96,7 +87,16 @@ jobs:
 
       - name: Verify AWS identity
         run: |
+
+          echo "=========================================="
+          echo "AWS IDENTITY"
+          echo "=========================================="
+
           aws sts get-caller-identity
+
+          echo ""
+          echo "AWS Region: $AWS_REGION"
+          echo "Environment: $ENVIRONMENT"
 
 
       # =====================================================
@@ -106,7 +106,9 @@ jobs:
       - name: Verify Lambda S3 bucket
         run: |
 
-          echo "Checking existing Lambda deployment bucket..."
+          echo "=========================================="
+          echo "CHECKING LAMBDA S3 BUCKET"
+          echo "=========================================="
 
           aws s3api head-bucket \
             --bucket "$LAMBDA_S3_BUCKET"
@@ -115,13 +117,15 @@ jobs:
 
 
       # =====================================================
-      # 5. VERIFY EXISTING REPORTS BUCKET
+      # 5. VERIFY EXISTING REPORTS S3 BUCKET
       # =====================================================
 
       - name: Verify Reports S3 bucket
         run: |
 
-          echo "Checking existing Reports bucket..."
+          echo "=========================================="
+          echo "CHECKING REPORTS S3 BUCKET"
+          echo "=========================================="
 
           aws s3api head-bucket \
             --bucket "$REPORTS_BUCKET"
@@ -130,26 +134,133 @@ jobs:
 
 
       # =====================================================
-      # 6. VERIFY REPORT LAMBDA SOURCE
+      # 6. VERIFY DASHBOARD SOURCE FILES
+      # =====================================================
+
+      - name: Verify Dashboard source files
+        run: |
+
+          echo "=========================================="
+          echo "CHECKING DASHBOARD SOURCE FILES"
+          echo "=========================================="
+
+          echo "Checking:"
+          echo "$DASHBOARD_APP_SOURCE"
+          echo "$DASHBOARD_INDEX_SOURCE"
+
+          test -s "$DASHBOARD_APP_SOURCE"
+          test -s "$DASHBOARD_INDEX_SOURCE"
+
+          echo ""
+          echo "Dashboard files found successfully."
+
+          echo ""
+          echo "Dashboard files:"
+          ls -lh \
+            "$DASHBOARD_APP_SOURCE" \
+            "$DASHBOARD_INDEX_SOURCE"
+
+
+      # =====================================================
+      # 7. UPLOAD DASHBOARD FILES TO S3
+      #
+      # IMPORTANT:
+      # login.html is NOT uploaded because login is now
+      # contained inside index.html.
+      # =====================================================
+
+      - name: Upload Dashboard Files
+        run: |
+
+          echo "=========================================="
+          echo "UPLOADING CLOUDMART DASHBOARD"
+          echo "=========================================="
+
+          echo "Bucket:"
+          echo "$DASHBOARD_S3_BUCKET"
+
+          echo ""
+          echo "Prefix:"
+          echo "$DASHBOARD_S3_PREFIX"
+
+          echo ""
+          echo "Uploading app.py..."
+
+          aws s3 cp \
+            "$DASHBOARD_APP_SOURCE" \
+            "s3://${DASHBOARD_S3_BUCKET}/${DASHBOARD_S3_PREFIX}/app.py"
+
+          echo ""
+          echo "Uploading index.html..."
+
+          aws s3 cp \
+            "$DASHBOARD_INDEX_SOURCE" \
+            "s3://${DASHBOARD_S3_BUCKET}/${DASHBOARD_S3_PREFIX}/index.html"
+
+          echo ""
+          echo "Dashboard files uploaded successfully."
+
+
+      # =====================================================
+      # 8. VERIFY DASHBOARD FILES IN S3
+      # =====================================================
+
+      - name: Verify Dashboard files in S3
+        run: |
+
+          echo "=========================================="
+          echo "VERIFYING DASHBOARD FILES IN S3"
+          echo "=========================================="
+
+          aws s3api head-object \
+            --bucket "$DASHBOARD_S3_BUCKET" \
+            --key "${DASHBOARD_S3_PREFIX}/app.py"
+
+          aws s3api head-object \
+            --bucket "$DASHBOARD_S3_BUCKET" \
+            --key "${DASHBOARD_S3_PREFIX}/index.html"
+
+          echo ""
+          echo "Dashboard files verified successfully."
+
+          echo ""
+          echo "Current dashboard objects:"
+          aws s3 ls \
+            "s3://${DASHBOARD_S3_BUCKET}/${DASHBOARD_S3_PREFIX}/"
+
+
+      # =====================================================
+      # 9. VERIFY REPORT LAMBDA SOURCE
       # =====================================================
 
       - name: Verify report Lambda source
         run: |
 
-          echo "Checking Lambda source..."
+          echo "=========================================="
+          echo "CHECKING REPORTING LAMBDA SOURCE"
+          echo "=========================================="
 
-          test -f "$REPORT_LAMBDA_SOURCE"
+          test -s "$REPORT_LAMBDA_SOURCE"
 
+          echo ""
           echo "Report Lambda source found:"
           echo "$REPORT_LAMBDA_SOURCE"
 
+          echo ""
+          echo "Lambda source size:"
+          ls -lh "$REPORT_LAMBDA_SOURCE"
+
 
       # =====================================================
-      # 7. CREATE LAMBDA PACKAGE DIRECTORY
+      # 10. CREATE LAMBDA PACKAGE DIRECTORY
       # =====================================================
 
       - name: Prepare Lambda package
         run: |
+
+          echo "=========================================="
+          echo "PREPARING LAMBDA PACKAGE"
+          echo "=========================================="
 
           rm -rf build/report
 
@@ -159,38 +270,52 @@ jobs:
 
 
       # =====================================================
-      # 8. INSTALL PYMYSQL
+      # 11. INSTALL PYMYSQL
       # =====================================================
 
       - name: Install Lambda dependencies
         run: |
 
+          echo "=========================================="
+          echo "INSTALLING LAMBDA DEPENDENCIES"
+          echo "=========================================="
+
           python -m pip install \
             PyMySQL \
             -t build/report
 
-          echo "PyMySQL installed."
+          echo ""
+          echo "PyMySQL installed successfully."
 
 
       # =====================================================
-      # 9. COPY LAMBDA CODE
+      # 12. COPY LAMBDA CODE
       # =====================================================
 
       - name: Copy Lambda source
         run: |
 
+          echo "=========================================="
+          echo "COPYING LAMBDA SOURCE"
+          echo "=========================================="
+
           cp "$REPORT_LAMBDA_SOURCE" \
              build/report/lambda_function.py
 
+          echo ""
           echo "Lambda source copied."
 
 
       # =====================================================
-      # 10. CREATE ZIP PACKAGE
+      # 13. CREATE ZIP PACKAGE
       # =====================================================
 
       - name: Package Reporting Lambda
         run: |
+
+          echo "=========================================="
+          echo "PACKAGING REPORTING LAMBDA"
+          echo "=========================================="
 
           cd build/report
 
@@ -198,13 +323,16 @@ jobs:
 
           cd ../..
 
+          echo ""
           echo "Lambda package created."
 
+          echo ""
+          echo "Package details:"
           ls -lh report.zip
 
 
       # =====================================================
-      # 11. UPLOAD LAMBDA PACKAGE TO EXISTING S3 BUCKET
+      # 14. UPLOAD LAMBDA PACKAGE TO S3
       # =====================================================
 
       - name: Upload Lambda package
@@ -213,39 +341,52 @@ jobs:
 
         run: |
 
-          echo "Uploading Reporting Lambda package..."
+          echo "=========================================="
+          echo "UPLOADING REPORTING LAMBDA PACKAGE"
+          echo "=========================================="
 
           aws s3 cp \
             report.zip \
             "s3://${LAMBDA_S3_BUCKET}/${LAMBDA_S3_KEY}"
 
-          echo "Uploaded:"
+          echo ""
+          echo "Lambda package uploaded:"
           echo "s3://${LAMBDA_S3_BUCKET}/${LAMBDA_S3_KEY}"
 
+          echo ""
           echo "LAMBDA_S3_KEY=$LAMBDA_S3_KEY" >> "$GITHUB_ENV"
 
 
       # =====================================================
-      # 12. VALIDATE REPORTING CLOUDFORMATION TEMPLATE
+      # 15. VALIDATE REPORTING CLOUDFORMATION TEMPLATE
       # =====================================================
 
       - name: Validate Reporting Stack
         run: |
 
+          echo "=========================================="
+          echo "VALIDATING CLOUDFORMATION TEMPLATE"
+          echo "=========================================="
+
           aws cloudformation validate-template \
             --template-body file://cloudformation/Reporting-stack.yaml \
             --region "$AWS_REGION"
 
+          echo ""
           echo "Reporting Stack template is valid."
 
 
       # =====================================================
-      # 13. CHECK REPORTING STACK
+      # 16. CHECK REPORTING STACK
       # =====================================================
 
       - name: Check Reporting Stack
         id: stack
         run: |
+
+          echo "=========================================="
+          echo "CHECKING REPORTING STACK"
+          echo "=========================================="
 
           if aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
@@ -266,7 +407,7 @@ jobs:
 
 
       # =====================================================
-      # 14. CREATE REPORTING STACK
+      # 17. CREATE REPORTING STACK
       # =====================================================
 
       - name: Create Reporting Stack
@@ -274,7 +415,9 @@ jobs:
 
         run: |
 
-          echo "Creating Reporting Stack..."
+          echo "=========================================="
+          echo "CREATING REPORTING STACK"
+          echo "=========================================="
 
           aws cloudformation create-stack \
             --stack-name "$STACK_NAME" \
@@ -294,11 +437,12 @@ jobs:
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"
 
+          echo ""
           echo "Reporting Stack creation started."
 
 
       # =====================================================
-      # 15. UPDATE REPORTING STACK
+      # 18. UPDATE REPORTING STACK
       # =====================================================
 
       - name: Update Reporting Stack
@@ -306,7 +450,9 @@ jobs:
 
         run: |
 
-          echo "Updating Reporting Stack..."
+          echo "=========================================="
+          echo "UPDATING REPORTING STACK"
+          echo "=========================================="
 
           set +e
 
@@ -336,27 +482,34 @@ jobs:
 
           if echo "$UPDATE_OUTPUT" | grep -q "No updates are to be performed"; then
 
+            echo ""
             echo "No CloudFormation changes detected."
 
           elif [ "$UPDATE_EXIT_CODE" -ne 0 ]; then
 
+            echo ""
             echo "CloudFormation update failed."
 
             exit "$UPDATE_EXIT_CODE"
 
           else
 
+            echo ""
             echo "Reporting Stack update started."
 
           fi
 
 
       # =====================================================
-      # 16. WAIT FOR STACK COMPLETION
+      # 19. WAIT FOR STACK COMPLETION
       # =====================================================
 
       - name: Wait for Reporting Stack
         run: |
+
+          echo "=========================================="
+          echo "WAITING FOR REPORTING STACK"
+          echo "=========================================="
 
           STATUS=$(aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
@@ -370,6 +523,7 @@ jobs:
 
             CREATE_IN_PROGRESS)
 
+              echo ""
               echo "Waiting for stack creation..."
 
               aws cloudformation wait stack-create-complete \
@@ -380,6 +534,7 @@ jobs:
 
             UPDATE_IN_PROGRESS)
 
+              echo ""
               echo "Waiting for stack update..."
 
               aws cloudformation wait stack-update-complete \
@@ -390,12 +545,14 @@ jobs:
 
             CREATE_COMPLETE|UPDATE_COMPLETE)
 
+              echo ""
               echo "Stack already completed."
 
               ;;
 
             *)
 
+              echo ""
               echo "Unexpected stack status: $STATUS"
 
               exit 1
@@ -404,13 +561,20 @@ jobs:
 
           esac
 
+          echo ""
+          echo "Reporting Stack completed successfully."
+
 
       # =====================================================
-      # 17. DISPLAY STACK STATUS
+      # 20. DISPLAY STACK STATUS
       # =====================================================
 
       - name: Display stack status
         run: |
+
+          echo "=========================================="
+          echo "REPORTING STACK STATUS"
+          echo "=========================================="
 
           aws cloudformation describe-stacks \
             --stack-name "$STACK_NAME" \
@@ -420,7 +584,7 @@ jobs:
 
 
       # =====================================================
-      # 18. DISPLAY STACK OUTPUTS
+      # 21. DISPLAY STACK OUTPUTS
       # =====================================================
 
       - name: Display Reporting Stack outputs
@@ -438,7 +602,7 @@ jobs:
 
 
       # =====================================================
-      # 19. VERIFY LAMBDA
+      # 22. VERIFY REPORTING LAMBDA
       # =====================================================
 
       - name: Verify Reporting Lambda
@@ -454,9 +618,12 @@ jobs:
             --query 'Configuration.[FunctionName,Runtime,Handler,Timeout,MemorySize]' \
             --output table
 
+          echo ""
+          echo "Reporting Lambda verified successfully."
+
 
       # =====================================================
-      # 20. VERIFY EVENTBRIDGE RULE
+      # 23. VERIFY EVENTBRIDGE RULE
       # =====================================================
 
       - name: Verify Reporting Schedule
@@ -472,4 +639,55 @@ jobs:
             --query 'Rules[*].[Name,State,ScheduleExpression]' \
             --output table
 
-          echo "Reporting deployment completed successfully."
+          echo ""
+          echo "EventBridge reporting schedule verified."
+
+
+      # =====================================================
+      # 24. FINAL DEPLOYMENT SUMMARY
+      # =====================================================
+
+      - name: Deployment summary
+        run: |
+
+          echo ""
+          echo "=================================================="
+          echo "       CLOUDMART REPORTING DEPLOYMENT"
+          echo "=================================================="
+
+          echo ""
+          echo "Environment:"
+          echo "  $ENVIRONMENT"
+
+          echo ""
+          echo "Reporting Stack:"
+          echo "  $STACK_NAME"
+
+          echo ""
+          echo "Lambda Bucket:"
+          echo "  $LAMBDA_S3_BUCKET"
+
+          echo ""
+          echo "Reports Bucket:"
+          echo "  $REPORTS_BUCKET"
+
+          echo ""
+          echo "Dashboard Location:"
+          echo "  s3://${DASHBOARD_S3_BUCKET}/${DASHBOARD_S3_PREFIX}/"
+
+          echo ""
+          echo "Dashboard Files:"
+          echo "  app.py"
+          echo "  index.html"
+
+          echo ""
+          echo "Existing reports/ prefix was not modified."
+
+          echo ""
+          echo "Login:"
+          echo "  Embedded inside index.html"
+
+          echo ""
+          echo "Deployment completed successfully."
+
+          echo "=================================================="
