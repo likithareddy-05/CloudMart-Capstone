@@ -510,6 +510,14 @@ Resources:
                 Resource:
                   !Sub arn:${AWS::Partition}:s3:::${DashboardS3Bucket}/${DashboardS3Prefix}/*
 
+              # allows EC2 to upload updated dashboard files to S3
+              - Sid: WriteDashboardFiles
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  !Sub arn:${AWS::Partition}:s3:::${DashboardS3Bucket}/${DashboardS3Prefix}/*
+
 
   # =======================================================
   # 6. EC2 DASHBOARD INSTANCE PROFILE
