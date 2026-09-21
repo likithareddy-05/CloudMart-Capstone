@@ -24,6 +24,15 @@ Parameters:
 
     Description: Deployment environment
 
+  DashboardS3Bucket:
+    Type: String
+    Description: S3 bucket containing CloudMart dashboard files
+
+  DashboardS3Prefix:
+    Type: String
+    Default: cloudmart-dashboard
+    Description: S3 prefix containing app.py, index.html and login.html
+
 
 # =========================================================
 # CONDITIONS
@@ -491,6 +500,15 @@ Resources:
 
                 Resource:
                   !Sub arn:${AWS::Partition}:s3:::cloudmart-${Environment}-reports-${AWS::AccountId}
+
+
+              # allows EC2 to read app.py, index.html and login.html
+              - Sid: ReadDashboardFiles
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  !Sub arn:${AWS::Partition}:s3:::${DashboardS3Bucket}/${DashboardS3Prefix}/*
 
 
   # =======================================================

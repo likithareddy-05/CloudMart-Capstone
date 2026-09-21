@@ -1,0 +1,2819 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        CloudMart Operations Dashboard
+    </title>
+
+
+    <style>
+
+        /* =====================================================
+           GLOBAL
+        ===================================================== */
+
+        :root {
+
+            --bg: #f4f7fb;
+
+            --surface: #ffffff;
+
+            --surface-soft: #f8fafc;
+
+            --text: #172033;
+
+            --muted: #667085;
+
+            --border: #e6eaf0;
+
+            --blue: #2563eb;
+
+            --blue-soft: #eaf2ff;
+
+            --green: #16a34a;
+
+            --green-soft: #eaf8ef;
+
+            --red: #dc2626;
+
+            --red-soft: #fef0f0;
+
+            --purple: #7c3aed;
+
+            --purple-soft: #f3edff;
+
+            --orange: #b54708;
+
+            --orange-soft: #fff4e5;
+
+            --shadow:
+                0 8px 24px
+                rgba(
+                    15,
+                    23,
+                    42,
+                    0.07
+                );
+
+            --shadow-hover:
+                0 14px 34px
+                rgba(
+                    15,
+                    23,
+                    42,
+                    0.12
+                );
+        }
+
+
+        * {
+            box-sizing: border-box;
+        }
+
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+
+        body {
+
+            margin: 0;
+
+            padding: 32px;
+
+            background: var(--bg);
+
+            color: var(--text);
+
+            font-family:
+                Arial,
+                Helvetica,
+                sans-serif;
+        }
+
+
+        button,
+        input,
+        select {
+            font: inherit;
+        }
+
+
+        /* =====================================================
+           PAGE
+        ===================================================== */
+
+        .page {
+
+            width: 100%;
+
+            max-width: 1400px;
+
+            margin: 0 auto;
+        }
+
+
+        /* =====================================================
+           HEADER
+        ===================================================== */
+
+        .header {
+
+            margin-bottom: 28px;
+        }
+
+
+        .header-row {
+
+            display: flex;
+
+            align-items: center;
+
+            justify-content: space-between;
+
+            gap: 24px;
+        }
+
+
+        .header-left {
+
+            min-width: 0;
+        }
+
+
+        h1 {
+
+            margin: 0 0 8px;
+
+            font-size: 34px;
+
+            line-height: 1.15;
+
+            letter-spacing: -0.6px;
+        }
+
+
+        .subtitle {
+
+            color: var(--muted);
+
+            font-size: 15px;
+
+            line-height: 1.5;
+        }
+
+
+        .environment {
+
+            display: inline-flex;
+
+            align-items: center;
+
+            gap: 8px;
+
+            margin-top: 10px;
+
+            padding: 6px 12px;
+
+            border-radius: 999px;
+
+            background: var(--blue-soft);
+
+            color: #1d4ed8;
+
+            font-size: 12px;
+
+            font-weight: 800;
+
+            text-transform: uppercase;
+
+            letter-spacing: 0.4px;
+        }
+
+
+        .environment-dot {
+
+            width: 7px;
+
+            height: 7px;
+
+            border-radius: 50%;
+
+            background: var(--green);
+        }
+
+
+        /* =====================================================
+           ADMIN AREA
+        ===================================================== */
+
+        .admin-area {
+
+            display: flex;
+
+            align-items: center;
+
+            gap: 12px;
+
+            flex-shrink: 0;
+
+            padding: 10px 12px;
+
+            border: 1px solid var(--border);
+
+            border-radius: 12px;
+
+            background: var(--surface);
+
+            box-shadow: var(--shadow);
+        }
+
+
+        .admin-user {
+
+            color: var(--text);
+
+            font-size: 13px;
+
+            font-weight: 700;
+
+            white-space: nowrap;
+        }
+
+
+        .session-info {
+
+            color: var(--muted);
+
+            font-size: 11px;
+
+            font-weight: 600;
+
+            white-space: nowrap;
+        }
+
+
+        .logout-btn {
+
+            display: inline-flex;
+
+            align-items: center;
+
+            justify-content: center;
+
+            padding: 8px 13px;
+
+            border-radius: 8px;
+
+            background: var(--text);
+
+            color: #ffffff;
+
+            text-decoration: none;
+
+            font-size: 12px;
+
+            font-weight: 700;
+
+            transition:
+                background 0.18s ease,
+                transform 0.18s ease;
+        }
+
+
+        .logout-btn:hover {
+
+            background: #0f172a;
+
+            transform: translateY(-1px);
+        }
+
+
+        /* =====================================================
+           KPI GRID
+        ===================================================== */
+
+        .kpi-grid {
+
+            display: grid;
+
+            grid-template-columns:
+                repeat(
+                    3,
+                    minmax(0, 1fr)
+                );
+
+            gap: 18px;
+
+            margin-bottom: 28px;
+        }
+
+
+        /* =====================================================
+           KPI CARD
+        ===================================================== */
+
+        .kpi-card {
+
+            width: 100%;
+
+            min-height: 165px;
+
+            padding: 22px;
+
+            border:
+                1px solid
+                var(--border);
+
+            border-radius: 14px;
+
+            background: var(--surface);
+
+            text-align: left;
+
+            box-shadow: var(--shadow);
+
+            cursor: pointer;
+
+            appearance: none;
+
+            -webkit-appearance: none;
+
+            transition:
+                transform 0.18s ease,
+                box-shadow 0.18s ease,
+                border-color 0.18s ease;
+        }
+
+
+        .kpi-card:hover {
+
+            transform:
+                translateY(-3px);
+
+            box-shadow:
+                var(--shadow-hover);
+
+            border-color: #cbd5e1;
+        }
+
+
+        .kpi-card:active {
+
+            transform:
+                translateY(-1px);
+        }
+
+
+        .kpi-card:focus-visible {
+
+            outline:
+                3px solid
+                rgba(
+                    37,
+                    99,
+                    235,
+                    0.25
+                );
+
+            outline-offset: 3px;
+        }
+
+
+        .kpi-top {
+
+            display: flex;
+
+            align-items: center;
+
+            justify-content: space-between;
+
+            gap: 15px;
+
+            margin-bottom: 16px;
+        }
+
+
+        .kpi-title {
+
+            color: var(--muted);
+
+            font-size: 12px;
+
+            font-weight: 800;
+
+            text-transform: uppercase;
+
+            letter-spacing: 0.5px;
+        }
+
+
+        .kpi-icon {
+
+            width: 40px;
+
+            height: 40px;
+
+            display: grid;
+
+            place-items: center;
+
+            flex-shrink: 0;
+
+            border-radius: 10px;
+
+            font-size: 18px;
+
+            font-weight: 800;
+        }
+
+
+        .icon-blue {
+
+            background:
+                var(--blue-soft);
+
+            color:
+                var(--blue);
+        }
+
+
+        .icon-green {
+
+            background:
+                var(--green-soft);
+
+            color:
+                var(--green);
+        }
+
+
+        .icon-red {
+
+            background:
+                var(--red-soft);
+
+            color:
+                var(--red);
+        }
+
+
+        .icon-purple {
+
+            background:
+                var(--purple-soft);
+
+            color:
+                var(--purple);
+        }
+
+
+        .kpi-value {
+
+            margin-bottom: 12px;
+
+            color: var(--text);
+
+            font-size: 30px;
+
+            font-weight: 800;
+
+            line-height: 1.1;
+
+            letter-spacing: -0.5px;
+        }
+
+
+        .kpi-action {
+
+            color: var(--blue);
+
+            font-size: 13px;
+
+            font-weight: 700;
+        }
+
+
+        /* =====================================================
+           GENERAL CARD
+        ===================================================== */
+
+        .card {
+
+            margin-bottom: 24px;
+
+            padding: 24px;
+
+            border:
+                1px solid
+                var(--border);
+
+            border-radius: 14px;
+
+            background:
+                var(--surface);
+
+            box-shadow:
+                var(--shadow);
+
+            overflow-x: auto;
+        }
+
+
+        .card-header {
+
+            display: flex;
+
+            align-items: center;
+
+            justify-content: space-between;
+
+            gap: 16px;
+
+            margin-bottom: 18px;
+        }
+
+
+        h2 {
+
+            margin: 0;
+
+            font-size: 21px;
+
+            line-height: 1.25;
+        }
+
+
+        .card-subtitle {
+
+            margin: 4px 0 0;
+
+            color: var(--muted);
+
+            font-size: 13px;
+        }
+
+
+        /* =====================================================
+           REPORT
+        ===================================================== */
+
+        .report-meta {
+
+            margin: 0 0 15px;
+
+            color: var(--muted);
+
+            font-size: 13px;
+
+            line-height: 1.6;
+        }
+
+
+        .report-file {
+
+            display: inline-block;
+
+            margin-bottom: 4px;
+
+            color: var(--text);
+
+            font-weight: 700;
+        }
+
+
+        .report-link {
+
+            display: inline-flex;
+
+            align-items: center;
+
+            gap: 8px;
+
+            padding: 10px 15px;
+
+            border-radius: 8px;
+
+            background: var(--text);
+
+            color: white;
+
+            text-decoration: none;
+
+            font-size: 13px;
+
+            font-weight: 700;
+
+            transition:
+                background 0.18s ease,
+                transform 0.18s ease;
+        }
+
+
+        .report-link:hover {
+
+            background: #0f172a;
+
+            transform:
+                translateY(-1px);
+        }
+
+
+        .report-note {
+
+            margin: 12px 0 0;
+
+            color: var(--muted);
+
+            font-size: 12px;
+
+            line-height: 1.5;
+        }
+
+
+        /* =====================================================
+           TABLE
+        ===================================================== */
+
+        table {
+
+            width: 100%;
+
+            border-collapse:
+                collapse;
+
+            min-width: 720px;
+        }
+
+
+        th,
+        td {
+
+            padding: 12px 10px;
+
+            border-bottom:
+                1px solid
+                var(--border);
+
+            text-align: left;
+
+            white-space: nowrap;
+        }
+
+
+        th {
+
+            background:
+                var(--surface-soft);
+
+            color: #475467;
+
+            font-size: 11px;
+
+            font-weight: 800;
+
+            text-transform: uppercase;
+
+            letter-spacing: 0.4px;
+        }
+
+
+        td {
+
+            color: #344054;
+
+            font-size: 13px;
+        }
+
+
+        tbody tr:hover,
+        tr:hover {
+
+            background:
+                #fafcff;
+        }
+
+
+        /* =====================================================
+           STATUS
+        ===================================================== */
+
+        .status {
+
+            display: inline-flex;
+
+            align-items: center;
+
+            padding: 5px 9px;
+
+            border-radius: 999px;
+
+            font-size: 11px;
+
+            font-weight: 800;
+        }
+
+
+        .status-confirmed {
+
+            background:
+                var(--green-soft);
+
+            color:
+                #15803d;
+        }
+
+
+        .status-failed {
+
+            background:
+                var(--red-soft);
+
+            color:
+                #b91c1c;
+        }
+
+
+        .status-default {
+
+            background:
+                #f2f4f7;
+
+            color:
+                #475467;
+        }
+
+
+        .low-stock {
+
+            color:
+                var(--orange);
+
+            font-weight:
+                800;
+        }
+
+
+        /* =====================================================
+           EMPTY STATE
+        ===================================================== */
+
+        .empty-state {
+
+            padding: 28px;
+
+            color: var(--muted);
+
+            text-align: center;
+
+            font-size: 14px;
+        }
+
+
+        /* =====================================================
+           MODAL BACKDROP
+        ===================================================== */
+
+        .modal-backdrop {
+
+            position: fixed;
+
+            inset: 0;
+
+            display: none;
+
+            align-items: center;
+
+            justify-content: center;
+
+            padding: 24px;
+
+            background:
+                rgba(
+                    15,
+                    23,
+                    42,
+                    0.58
+                );
+
+            z-index: 1000;
+        }
+
+
+        .modal-backdrop.open {
+
+            display: flex;
+        }
+
+
+        /* =====================================================
+           MODAL
+        ===================================================== */
+
+        .modal {
+
+            width:
+                min(
+                    1100px,
+                    100%
+                );
+
+            max-height:
+                88vh;
+
+            overflow:
+                hidden;
+
+            border-radius:
+                16px;
+
+            background:
+                var(--surface);
+
+            box-shadow:
+                0 24px 70px
+                rgba(
+                    15,
+                    23,
+                    42,
+                    0.25
+                );
+        }
+
+
+        .modal-header {
+
+            display: flex;
+
+            align-items: center;
+
+            justify-content: space-between;
+
+            gap: 16px;
+
+            padding:
+                19px 22px;
+
+            border-bottom:
+                1px solid
+                var(--border);
+        }
+
+
+        .modal-header h2 {
+
+            font-size: 20px;
+        }
+
+
+        .close-btn {
+
+            width: 36px;
+
+            height: 36px;
+
+            display: grid;
+
+            place-items: center;
+
+            border: 0;
+
+            border-radius: 9px;
+
+            background:
+                #f2f4f7;
+
+            color:
+                #344054;
+
+            cursor: pointer;
+
+            font-size: 21px;
+
+            line-height: 1;
+
+            transition:
+                background 0.15s ease;
+        }
+
+
+        .close-btn:hover {
+
+            background:
+                #e4e7ec;
+        }
+
+
+        .modal-body {
+
+            max-height:
+                calc(
+                    88vh - 76px
+                );
+
+            padding: 22px;
+
+            overflow: auto;
+        }
+
+
+        .modal-panel {
+
+            display: none;
+        }
+
+
+        .modal-panel.active {
+
+            display: block;
+        }
+
+
+        .summary-note {
+
+            margin:
+                0 0 18px;
+
+            color:
+                var(--muted);
+
+            font-size: 13px;
+
+            line-height: 1.5;
+        }
+
+
+        /* =====================================================
+           RESPONSIVE
+        ===================================================== */
+
+        @media (
+            max-width: 1000px
+        ) {
+
+            body {
+                padding: 22px;
+            }
+
+
+            .header-row {
+
+                align-items:
+                    flex-start;
+
+                flex-direction:
+                    column;
+            }
+
+
+            .admin-area {
+
+                width: 100%;
+
+                justify-content:
+                    space-between;
+            }
+
+
+            .kpi-grid {
+
+                grid-template-columns:
+                    repeat(
+                        2,
+                        minmax(0, 1fr)
+                    );
+            }
+        }
+
+
+        @media (
+            max-width: 650px
+        ) {
+
+            body {
+                padding: 16px;
+            }
+
+
+            h1 {
+                font-size: 27px;
+            }
+
+
+            .kpi-grid {
+
+                grid-template-columns:
+                    1fr;
+            }
+
+
+            .admin-area {
+
+                align-items:
+                    flex-start;
+
+                flex-wrap:
+                    wrap;
+            }
+
+
+            .session-info {
+
+                width: 100%;
+            }
+
+
+            .card {
+
+                padding: 18px;
+            }
+
+
+            .modal-backdrop {
+
+                padding: 12px;
+            }
+
+
+            .modal-body {
+
+                padding: 16px;
+            }
+        }
+
+    </style>
+
+</head>
+
+
+<body>
+
+
+<div class="page">
+
+
+    <!-- =====================================================
+         HEADER
+    ====================================================== -->
+
+    <header class="header">
+
+        <div class="header-row">
+
+
+            <div class="header-left">
+
+                <h1>
+                    CloudMart Operations Dashboard
+                </h1>
+
+
+                <div class="subtitle">
+
+                    Real-time operational view
+                    of CloudMart
+
+                </div>
+
+
+                <div class="environment">
+
+                    <span
+                        class="environment-dot"
+                    ></span>
+
+                    Environment:
+                    {{ environment|upper }}
+
+                </div>
+
+            </div>
+
+
+            <!-- ADMIN -->
+
+            <div class="admin-area">
+
+
+                <span class="admin-user">
+
+                    Admin:
+                    {{ session.get(
+                        "admin_name",
+                        "Administrator"
+                    ) }}
+
+                </span>
+
+
+                <span class="session-info">
+
+                    Auto logout after
+                    {{ session_timeout_minutes }}
+                    min inactivity
+
+                </span>
+
+
+                <a
+                    class="logout-btn"
+                    href="{{ url_for('logout') }}"
+                >
+
+                    Logout
+
+                </a>
+
+
+            </div>
+
+
+        </div>
+
+    </header>
+
+
+
+    <!-- =====================================================
+         KPI CARDS
+    ====================================================== -->
+
+    <section class="kpi-grid">
+
+
+        <!-- TOTAL ORDERS -->
+
+        <button
+            class="kpi-card"
+            type="button"
+            onclick="openKpi('total-orders')"
+            aria-label="View total orders"
+        >
+
+            <div class="kpi-top">
+
+                <div class="kpi-title">
+
+                    Total Orders
+
+                </div>
+
+
+                <div
+                    class="kpi-icon icon-blue"
+                >
+
+                    📦
+
+                </div>
+
+            </div>
+
+
+            <div class="kpi-value">
+
+                {{ stats.total_orders }}
+
+            </div>
+
+
+            <div class="kpi-action">
+
+                View orders →
+
+            </div>
+
+        </button>
+
+
+
+        <!-- CONFIRMED ORDERS -->
+
+        <button
+            class="kpi-card"
+            type="button"
+            onclick="openKpi('confirmed-orders')"
+            aria-label="View confirmed orders"
+        >
+
+            <div class="kpi-top">
+
+                <div class="kpi-title">
+
+                    Confirmed Orders
+
+                </div>
+
+
+                <div
+                    class="kpi-icon icon-green"
+                >
+
+                    ✓
+
+                </div>
+
+            </div>
+
+
+            <div class="kpi-value">
+
+                {{ stats.confirmed_orders }}
+
+            </div>
+
+
+            <div class="kpi-action">
+
+                View confirmed →
+
+            </div>
+
+        </button>
+
+
+
+        <!-- FAILED ORDERS -->
+
+        <button
+            class="kpi-card"
+            type="button"
+            onclick="openKpi('failed-orders')"
+            aria-label="View failed orders"
+        >
+
+            <div class="kpi-top">
+
+                <div class="kpi-title">
+
+                    Failed Orders
+
+                </div>
+
+
+                <div
+                    class="kpi-icon icon-red"
+                >
+
+                    !
+
+                </div>
+
+            </div>
+
+
+            <div class="kpi-value">
+
+                {{ stats.failed_orders }}
+
+            </div>
+
+
+            <div class="kpi-action">
+
+                View failed →
+
+            </div>
+
+        </button>
+
+
+
+        <!-- ORDER ITEMS -->
+
+        <button
+            class="kpi-card"
+            type="button"
+            onclick="openKpi('order-items')"
+            aria-label="View order items"
+        >
+
+            <div class="kpi-top">
+
+                <div class="kpi-title">
+
+                    Order Items
+
+                </div>
+
+
+                <div
+                    class="kpi-icon icon-purple"
+                >
+
+                    🛒
+
+                </div>
+
+            </div>
+
+
+            <div class="kpi-value">
+
+                {{ stats.order_items }}
+
+            </div>
+
+
+            <div class="kpi-action">
+
+                View items →
+
+            </div>
+
+        </button>
+
+
+
+        <!-- ACTIVE PRODUCTS -->
+
+        <button
+            class="kpi-card"
+            type="button"
+            onclick="openKpi('active-products')"
+            aria-label="View active products"
+        >
+
+            <div class="kpi-top">
+
+                <div class="kpi-title">
+
+                    Active Products
+
+                </div>
+
+
+                <div
+                    class="kpi-icon icon-blue"
+                >
+
+                    🛍️
+
+                </div>
+
+            </div>
+
+
+            <div class="kpi-value">
+
+                {{ stats.active_products }}
+
+            </div>
+
+
+            <div class="kpi-action">
+
+                View products →
+
+            </div>
+
+        </button>
+
+
+
+        <!-- TOTAL REVENUE -->
+
+        <button
+            class="kpi-card"
+            type="button"
+            onclick="openKpi('revenue')"
+            aria-label="View total revenue"
+        >
+
+            <div class="kpi-top">
+
+                <div class="kpi-title">
+
+                    Total Revenue
+
+                </div>
+
+
+                <div
+                    class="kpi-icon icon-green"
+                >
+
+                    ₹
+
+                </div>
+
+            </div>
+
+
+            <div class="kpi-value">
+
+                ₹{{ "{:,.2f}".format(
+                    stats.total_revenue|float
+                ) }}
+
+            </div>
+
+
+            <div class="kpi-action">
+
+                View revenue →
+
+            </div>
+
+        </button>
+
+
+    </section>
+
+
+
+    <!-- =====================================================
+         LATEST REPORT
+    ====================================================== -->
+
+    <section class="card">
+
+
+        <div class="card-header">
+
+            <div>
+
+                <h2>
+                    Latest Daily Report
+                </h2>
+
+                <p class="card-subtitle">
+
+                    Most recently generated
+                    CloudMart operational report
+
+                </p>
+
+            </div>
+
+        </div>
+
+
+        {% if latest_report %}
+
+
+            <div class="report-meta">
+
+                <div class="report-file">
+
+                    {{ latest_report.key }}
+
+                </div>
+
+
+                <div>
+
+                    Last modified:
+                    {{ latest_report.last_modified }}
+
+                </div>
+
+            </div>
+
+
+            <a
+                class="report-link"
+                href="{{ url_for(
+                    'download_latest_report'
+                ) }}"
+            >
+
+                ↓
+                Download Latest Report
+
+            </a>
+
+
+            <p class="report-note">
+
+                The report is stored in S3.
+                Downloading it through the
+                authenticated dashboard does not
+                use a 1-hour presigned URL.
+
+            </p>
+
+
+        {% else %}
+
+
+            <div class="empty-state">
+
+                No report is currently available.
+
+            </div>
+
+
+        {% endif %}
+
+
+    </section>
+
+
+
+    <!-- =====================================================
+         CURRENT INVENTORY
+    ====================================================== -->
+
+    <section
+        class="card"
+        id="inventory-section"
+    >
+
+
+        <div class="card-header">
+
+            <div>
+
+                <h2>
+                    Current Product Inventory
+                </h2>
+
+                <p class="card-subtitle">
+
+                    Active products and their
+                    current inventory levels
+
+                </p>
+
+            </div>
+
+        </div>
+
+
+        {% if products %}
+
+
+            <table>
+
+                <thead>
+
+                    <tr>
+
+                        <th>
+                            ID
+                        </th>
+
+                        <th>
+                            Product
+                        </th>
+
+                        <th>
+                            Category
+                        </th>
+
+                        <th>
+                            Price
+                        </th>
+
+                        <th>
+                            Stock
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+
+                <tbody>
+
+
+                    {% for product in products %}
+
+
+                    <tr>
+
+                        <td>
+                            {{ product.id }}
+                        </td>
+
+                        <td>
+                            {{ product.name }}
+                        </td>
+
+                        <td>
+                            {{ product.category }}
+                        </td>
+
+                        <td>
+                            ₹{{ product.price }}
+                        </td>
+
+                        <td
+                            class="{% if product.stock_count <= 5 %}low-stock{% endif %}"
+                        >
+
+                            {{ product.stock_count }}
+
+                        </td>
+
+                    </tr>
+
+
+                    {% endfor %}
+
+
+                </tbody>
+
+            </table>
+
+
+        {% else %}
+
+
+            <div class="empty-state">
+
+                No active products found.
+
+            </div>
+
+
+        {% endif %}
+
+
+    </section>
+
+
+
+    <!-- =====================================================
+         RECENT ORDER ITEMS
+    ====================================================== -->
+
+    <section
+        class="card"
+        id="orders-section"
+    >
+
+
+        <div class="card-header">
+
+            <div>
+
+                <h2>
+                    Recent Order Items
+                </h2>
+
+                <p class="card-subtitle">
+
+                    Latest order-item activity
+
+                </p>
+
+            </div>
+
+        </div>
+
+
+        {% if orders %}
+
+
+            <table>
+
+                <thead>
+
+                    <tr>
+
+                        <th>
+                            Order ID
+                        </th>
+
+                        <th>
+                            Customer
+                        </th>
+
+                        <th>
+                            Status
+                        </th>
+
+                        <th>
+                            Product
+                        </th>
+
+                        <th>
+                            Quantity
+                        </th>
+
+                        <th>
+                            Price
+                        </th>
+
+                        <th>
+                            Subtotal
+                        </th>
+
+                        <th>
+                            Created
+                        </th>
+
+                    </tr>
+
+                </thead>
+
+
+                <tbody>
+
+
+                    {% for order in orders %}
+
+
+                    <tr>
+
+                        <td>
+                            {{ order.order_id }}
+                        </td>
+
+                        <td>
+                            {{ order.customer_id }}
+                        </td>
+
+
+                        <td>
+
+                            <span
+                                class="status
+                                {% if order.status == 'CONFIRMED' %}
+                                    status-confirmed
+                                {% elif order.status == 'FAILED' %}
+                                    status-failed
+                                {% else %}
+                                    status-default
+                                {% endif %}"
+                            >
+
+                                {{ order.status }}
+
+                            </span>
+
+                        </td>
+
+
+                        <td>
+                            {{ order.product_name }}
+                        </td>
+
+
+                        <td>
+                            {{ order.quantity }}
+                        </td>
+
+
+                        <td>
+                            ₹{{ order.price }}
+                        </td>
+
+
+                        <td>
+                            ₹{{ order.subtotal }}
+                        </td>
+
+
+                        <td>
+                            {{ order.created_at }}
+                        </td>
+
+                    </tr>
+
+
+                    {% endfor %}
+
+
+                </tbody>
+
+            </table>
+
+
+        {% else %}
+
+
+            <div class="empty-state">
+
+                No order items found.
+
+            </div>
+
+
+        {% endif %}
+
+
+    </section>
+
+
+</div>
+
+
+
+<!-- =========================================================
+     KPI DETAIL MODAL
+========================================================= -->
+
+<div
+    class="modal-backdrop"
+    id="kpiModal"
+    onclick="closeKpi(event)"
+>
+
+
+    <div
+        class="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="modalTitle"
+        onclick="event.stopPropagation()"
+    >
+
+
+        <!-- MODAL HEADER -->
+
+        <div class="modal-header">
+
+            <h2 id="modalTitle">
+
+                KPI Details
+
+            </h2>
+
+
+            <button
+                class="close-btn"
+                type="button"
+                onclick="closeKpi()"
+                aria-label="Close"
+            >
+
+                ×
+
+            </button>
+
+        </div>
+
+
+
+        <!-- MODAL BODY -->
+
+        <div class="modal-body">
+
+
+
+            <!-- =================================================
+                 TOTAL ORDERS
+            ================================================== -->
+
+            <div
+                class="modal-panel"
+                id="panel-total-orders"
+            >
+
+                <p class="summary-note">
+
+                    Showing the latest 100 orders
+                    available to the dashboard.
+
+                </p>
+
+
+                {% if order_summaries %}
+
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+
+                            <th>
+                                Order ID
+                            </th>
+
+                            <th>
+                                Customer
+                            </th>
+
+                            <th>
+                                Amount
+                            </th>
+
+                            <th>
+                                Status
+                            </th>
+
+                            <th>
+                                Created
+                            </th>
+
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+
+                        {% for order
+                            in order_summaries %}
+
+
+                        <tr>
+
+                            <td>
+                                {{ order.order_id }}
+                            </td>
+
+                            <td>
+                                {{ order.customer_id }}
+                            </td>
+
+                            <td>
+                                ₹{{ order.total_amount }}
+                            </td>
+
+                            <td>
+
+                                <span
+                                    class="status
+                                    {% if order.status == 'CONFIRMED' %}
+                                        status-confirmed
+                                    {% elif order.status == 'FAILED' %}
+                                        status-failed
+                                    {% else %}
+                                        status-default
+                                    {% endif %}"
+                                >
+
+                                    {{ order.status }}
+
+                                </span>
+
+                            </td>
+
+                            <td>
+                                {{ order.created_at }}
+                            </td>
+
+                        </tr>
+
+
+                        {% endfor %}
+
+
+                    </tbody>
+
+                </table>
+
+
+                {% else %}
+
+
+                <div class="empty-state">
+
+                    No orders found.
+
+                </div>
+
+
+                {% endif %}
+
+            </div>
+
+
+
+            <!-- =================================================
+                 CONFIRMED ORDERS
+            ================================================== -->
+
+            <div
+                class="modal-panel"
+                id="panel-confirmed-orders"
+            >
+
+                <p class="summary-note">
+
+                    Orders with
+                    <strong>CONFIRMED</strong>
+                    status.
+
+                    These orders contribute to
+                    total revenue.
+
+                </p>
+
+
+                {% if order_summaries %}
+
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+
+                            <th>
+                                Order ID
+                            </th>
+
+                            <th>
+                                Customer
+                            </th>
+
+                            <th>
+                                Amount
+                            </th>
+
+                            <th>
+                                Created
+                            </th>
+
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+
+                        {% for order
+                            in order_summaries
+                            if order.status == 'CONFIRMED' %}
+
+
+                        <tr>
+
+                            <td>
+                                {{ order.order_id }}
+                            </td>
+
+                            <td>
+                                {{ order.customer_id }}
+                            </td>
+
+                            <td>
+                                ₹{{ order.total_amount }}
+                            </td>
+
+                            <td>
+                                {{ order.created_at }}
+                            </td>
+
+                        </tr>
+
+
+                        {% endfor %}
+
+
+                    </tbody>
+
+                </table>
+
+
+                {% else %}
+
+
+                <div class="empty-state">
+
+                    No confirmed orders found.
+
+                </div>
+
+
+                {% endif %}
+
+            </div>
+
+
+
+            <!-- =================================================
+                 FAILED ORDERS
+            ================================================== -->
+
+            <div
+                class="modal-panel"
+                id="panel-failed-orders"
+            >
+
+                <p class="summary-note">
+
+                    Orders with
+                    <strong>FAILED</strong>
+                    status.
+
+                </p>
+
+
+                {% if order_summaries %}
+
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+
+                            <th>
+                                Order ID
+                            </th>
+
+                            <th>
+                                Customer
+                            </th>
+
+                            <th>
+                                Amount
+                            </th>
+
+                            <th>
+                                Created
+                            </th>
+
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+
+                        {% for order
+                            in order_summaries
+                            if order.status == 'FAILED' %}
+
+
+                        <tr>
+
+                            <td>
+                                {{ order.order_id }}
+                            </td>
+
+                            <td>
+                                {{ order.customer_id }}
+                            </td>
+
+                            <td>
+                                ₹{{ order.total_amount }}
+                            </td>
+
+                            <td>
+                                {{ order.created_at }}
+                            </td>
+
+                        </tr>
+
+
+                        {% endfor %}
+
+
+                    </tbody>
+
+                </table>
+
+
+                {% else %}
+
+
+                <div class="empty-state">
+
+                    No failed orders found.
+
+                </div>
+
+
+                {% endif %}
+
+            </div>
+
+
+
+            <!-- =================================================
+                 ORDER ITEMS
+            ================================================== -->
+
+            <div
+                class="modal-panel"
+                id="panel-order-items"
+            >
+
+                <p class="summary-note">
+
+                    Showing the latest 50
+                    order-item records.
+
+                </p>
+
+
+                {% if orders %}
+
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+
+                            <th>
+                                Item ID
+                            </th>
+
+                            <th>
+                                Order ID
+                            </th>
+
+                            <th>
+                                Product
+                            </th>
+
+                            <th>
+                                Quantity
+                            </th>
+
+                            <th>
+                                Unit Price
+                            </th>
+
+                            <th>
+                                Subtotal
+                            </th>
+
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+
+                        {% for item in orders %}
+
+
+                        <tr>
+
+                            <td>
+                                {{ item.order_item_id }}
+                            </td>
+
+                            <td>
+                                {{ item.order_id }}
+                            </td>
+
+                            <td>
+                                {{ item.product_name }}
+                            </td>
+
+                            <td>
+                                {{ item.quantity }}
+                            </td>
+
+                            <td>
+                                ₹{{ item.price }}
+                            </td>
+
+                            <td>
+                                ₹{{ item.subtotal }}
+                            </td>
+
+                        </tr>
+
+
+                        {% endfor %}
+
+
+                    </tbody>
+
+                </table>
+
+
+                {% else %}
+
+
+                <div class="empty-state">
+
+                    No order items found.
+
+                </div>
+
+
+                {% endif %}
+
+            </div>
+
+
+
+            <!-- =================================================
+                 ACTIVE PRODUCTS
+            ================================================== -->
+
+            <div
+                class="modal-panel"
+                id="panel-active-products"
+            >
+
+                <p class="summary-note">
+
+                    Active products are products
+                    where
+                    <strong>
+                        is_deleted = FALSE
+                    </strong>.
+
+                </p>
+
+
+                {% if products %}
+
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+
+                            <th>
+                                ID
+                            </th>
+
+                            <th>
+                                Product
+                            </th>
+
+                            <th>
+                                Category
+                            </th>
+
+                            <th>
+                                Price
+                            </th>
+
+                            <th>
+                                Stock
+                            </th>
+
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+
+                        {% for product in products %}
+
+
+                        <tr>
+
+                            <td>
+                                {{ product.id }}
+                            </td>
+
+                            <td>
+                                {{ product.name }}
+                            </td>
+
+                            <td>
+                                {{ product.category }}
+                            </td>
+
+                            <td>
+                                ₹{{ product.price }}
+                            </td>
+
+                            <td
+                                class="{% if product.stock_count <= 5 %}low-stock{% endif %}"
+                            >
+
+                                {{ product.stock_count }}
+
+                            </td>
+
+                        </tr>
+
+
+                        {% endfor %}
+
+
+                    </tbody>
+
+                </table>
+
+
+                {% else %}
+
+
+                <div class="empty-state">
+
+                    No active products found.
+
+                </div>
+
+
+                {% endif %}
+
+            </div>
+
+
+
+            <!-- =================================================
+                 REVENUE
+            ================================================== -->
+
+            <div
+                class="modal-panel"
+                id="panel-revenue"
+            >
+
+                <p class="summary-note">
+
+                    Total Revenue is calculated
+                    as the sum of
+                    <strong>total_amount</strong>
+                    for orders with status
+                    <strong>CONFIRMED</strong>.
+
+                </p>
+
+
+                {% if order_summaries %}
+
+
+                <table>
+
+                    <thead>
+
+                        <tr>
+
+                            <th>
+                                Order ID
+                            </th>
+
+                            <th>
+                                Customer
+                            </th>
+
+                            <th>
+                                Revenue
+                            </th>
+
+                            <th>
+                                Created
+                            </th>
+
+                        </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+
+                        {% for order
+                            in order_summaries
+                            if order.status == 'CONFIRMED' %}
+
+
+                        <tr>
+
+                            <td>
+                                {{ order.order_id }}
+                            </td>
+
+                            <td>
+                                {{ order.customer_id }}
+                            </td>
+
+                            <td>
+                                ₹{{ order.total_amount }}
+                            </td>
+
+                            <td>
+                                {{ order.created_at }}
+                            </td>
+
+                        </tr>
+
+
+                        {% endfor %}
+
+
+                    </tbody>
+
+                </table>
+
+
+                {% else %}
+
+
+                <div class="empty-state">
+
+                    No revenue records found.
+
+                </div>
+
+
+                {% endif %}
+
+            </div>
+
+
+        </div>
+
+    </div>
+
+</div>
+
+
+
+<!-- =========================================================
+     JAVASCRIPT
+========================================================= -->
+
+<script>
+
+
+    /* =========================================================
+       KPI MODAL
+    ========================================================= */
+
+
+    const modal =
+        document.getElementById(
+            "kpiModal"
+        );
+
+
+    const modalTitle =
+        document.getElementById(
+            "modalTitle"
+        );
+
+
+    const titles = {
+
+        "total-orders":
+            "Total Orders",
+
+        "confirmed-orders":
+            "Confirmed Orders",
+
+        "failed-orders":
+            "Failed Orders",
+
+        "order-items":
+            "Order Items",
+
+        "active-products":
+            "Active Products",
+
+        "revenue":
+            "Total Revenue"
+
+    };
+
+
+    function openKpi(name) {
+
+
+        /*
+         * Hide all panels first.
+         */
+
+        document
+            .querySelectorAll(
+                ".modal-panel"
+            )
+            .forEach(
+                function(panel) {
+
+                    panel.classList.remove(
+                        "active"
+                    );
+
+                }
+            );
+
+
+        /*
+         * Find selected panel.
+         */
+
+        const panel =
+            document.getElementById(
+                "panel-" + name
+            );
+
+
+        if (!panel) {
+
+            return;
+
+        }
+
+
+        /*
+         * Show selected panel.
+         */
+
+        panel.classList.add(
+            "active"
+        );
+
+
+        /*
+         * Update title.
+         */
+
+        modalTitle.textContent =
+            titles[name]
+            ||
+            "KPI Details";
+
+
+        /*
+         * Open modal.
+         */
+
+        modal.classList.add(
+            "open"
+        );
+
+
+        /*
+         * Prevent background scrolling.
+         */
+
+        document.body.style.overflow =
+            "hidden";
+
+    }
+
+
+
+    function closeKpi(event) {
+
+
+        /*
+         * If click happened inside modal,
+         * don't close it.
+         */
+
+        if (
+            event
+            &&
+            event.target !== modal
+        ) {
+
+            return;
+
+        }
+
+
+        modal.classList.remove(
+            "open"
+        );
+
+
+        document.body.style.overflow =
+            "";
+
+    }
+
+
+
+    /*
+     * Escape key closes modal.
+     */
+
+    document.addEventListener(
+        "keydown",
+        function(event) {
+
+            if (
+                event.key ===
+                "Escape"
+            ) {
+
+                closeKpi();
+
+            }
+
+        }
+    );
+
+
+
+    /* =========================================================
+       ADMIN SESSION INACTIVITY TIMEOUT
+    ========================================================= */
+
+
+    /*
+     * Flask passes the configured
+     * inactivity timeout here.
+     *
+     * Example:
+     *
+     * 60 minutes
+     * =
+     * 3,600,000 milliseconds
+     */
+
+    const SESSION_TIMEOUT_MS =
+        {{ session_timeout_minutes }}
+        * 60
+        * 1000;
+
+
+    let inactivityTimer;
+
+
+
+    function resetInactivityTimer() {
+
+
+        /*
+         * Clear the existing timer.
+         */
+
+        clearTimeout(
+            inactivityTimer
+        );
+
+
+        /*
+         * Start a new timer.
+         */
+
+        inactivityTimer =
+            setTimeout(
+                function() {
+
+
+                    /*
+                     * The admin has been
+                     * inactive for the
+                     * configured period.
+                     *
+                     * Flask clears the
+                     * session on logout.
+                     */
+
+                    window.location.href =
+                        "{{ url_for(
+                            'logout',
+                            expired=1
+                        ) }}";
+
+                },
+                SESSION_TIMEOUT_MS
+            );
+
+    }
+
+
+
+    /*
+     * Reset the inactivity timer
+     * whenever the administrator
+     * interacts with the page.
+     */
+
+    [
+        "click",
+        "keydown",
+        "mousemove",
+        "scroll",
+        "touchstart"
+    ].forEach(
+        function(eventName) {
+
+            document.addEventListener(
+                eventName,
+                resetInactivityTimer,
+                {
+                    passive: true
+                }
+            );
+
+        }
+    );
+
+
+
+    /*
+     * Start timer when dashboard loads.
+     */
+
+    resetInactivityTimer();
+
+
+</script>
+
+
+</body>
+
+</html>

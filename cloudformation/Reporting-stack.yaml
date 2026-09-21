@@ -2,291 +2,160 @@ AWSTemplateFormatVersion: '2010-09-09'
 
 Description: >
   CloudMart Reporting Stack.
-  Creates the Report Generator Lambda and its
-  scheduled EventBridge trigger.
-  Existing Network, Security and S3 resources are reused.
-
-
-# ============================================================
-# PARAMETERS
-# ============================================================
+  Creates the Report Generator Lambda, daily EventBridge schedule,
+  and the Flask dashboard EC2 instance.
+  Dashboard source files are read from S3 at EC2 bootstrap time.
 
 Parameters:
 
   Environment:
     Type: String
     Default: dev
-
     AllowedValues:
       - dev
       - test
       - prod
-
     Description: Deployment environment
 
   InstanceType:
     Type: String
     Default: t3.micro
-
-    Description:
-      EC2 instance type for the CloudMart dashboard
+    Description: EC2 instance type for the CloudMart dashboard
 
   LatestAmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-
-    Default:
-      /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
-
-    Description:
-      Latest Amazon Linux 2023 AMI
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: Latest Amazon Linux 2023 AMI
 
   LambdaS3Bucket:
     Type: String
-
-    Description:
-      Existing S3 bucket containing packaged Lambda code
+    Description: Existing S3 bucket containing packaged Lambda code
 
   LambdaS3Key:
     Type: String
-
-    Description:
-      S3 key for the reporting Lambda package
+    Description: S3 key for the reporting Lambda package
 
   ReportsBucketName:
     Type: String
+    Description: Existing S3 bucket used to store CloudMart reports
 
-    Description:
-      Existing S3 bucket used to store CloudMart reports
+  DashboardS3Bucket:
+    Type: String
+    Description: >
+      S3 bucket containing the separate dashboard source files:
+      app.py, index.html and login.html
+
+  DashboardS3Prefix:
+    Type: String
+    Default: cloudmart-dashboard
+    Description: >
+      S3 prefix containing app.py, index.html and login.html.
+      Do not include a leading or trailing slash.
 
   DbHostParameterName:
     Type: String
-
     Default: /cloudmart/dev/db/host
-
-    Description:
-      SSM parameter containing the RDS MySQL host
+    Description: SSM parameter containing the RDS MySQL host
 
   DbPortParameterName:
     Type: String
-
     Default: /cloudmart/dev/db/port
-
-    Description:
-      SSM parameter containing the RDS MySQL port
+    Description: SSM parameter containing the RDS MySQL port
 
   DbNameParameterName:
     Type: String
-
     Default: /cloudmart/dev/db/name
-
-    Description:
-      SSM parameter containing the database name
+    Description: SSM parameter containing the database name
 
   DbUsernameParameterName:
     Type: String
-
     Default: /cloudmart/dev/db/username
-
-    Description:
-      SSM parameter containing the database username
+    Description: SSM parameter containing the database username
 
   DbPasswordParameterName:
     Type: String
-
     Default: /cloudmart/dev/db/password
-
-    Description:
-      SSM SecureString parameter containing the database password
-
-
-# ============================================================
-# RESOURCES
-# ============================================================
+    Description: SSM SecureString parameter containing the database password
 
 Resources:
 
-
-  # ============================================================
-  # REPORT GENERATOR LAMBDA
-  # ============================================================
+  ReportGeneratorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/CloudMart-${Environment}-ReportGenerator
+      RetentionInDays: 14
+      Tags:
+        - Key: Project
+          Value: CloudMart
+        - Key: Environment
+          Value: !Ref Environment
 
   ReportGeneratorLambda:
     Type: AWS::Lambda::Function
-
     DependsOn:
       - ReportGeneratorLogGroup
-
     Properties:
-
-      FunctionName:
-        !Sub CloudMart-${Environment}-ReportGenerator
-
+      FunctionName: !Sub CloudMart-${Environment}-ReportGenerator
       Runtime: python3.12
-
       Handler: lambda_function.lambda_handler
-
       Timeout: 60
-
       MemorySize: 256
-
-
-      # --------------------------------------------------------
-      # EXISTING SECURITY STACK ROLE
-      # --------------------------------------------------------
 
       Role:
         Fn::ImportValue:
           !Sub CloudMart-${Environment}-ReportGeneratorLambdaRoleArn
 
-
-      # --------------------------------------------------------
-      # LAMBDA CODE
-      # --------------------------------------------------------
-
       Code:
-
-        S3Bucket:
-          !Ref LambdaS3Bucket
-
-        S3Key:
-          !Ref LambdaS3Key
-
-
-      # --------------------------------------------------------
-      # EXISTING NETWORK RESOURCES
-      # --------------------------------------------------------
+        S3Bucket: !Ref LambdaS3Bucket
+        S3Key: !Ref LambdaS3Key
 
       VpcConfig:
-
         SubnetIds:
-
           - Fn::ImportValue:
               !Sub CloudMart-${Environment}-PrivateSubnetId
-
         SecurityGroupIds:
-
           - Fn::ImportValue:
               !Sub CloudMart-${Environment}-LambdaSecurityGroupId
 
-
-      # --------------------------------------------------------
-      # ENVIRONMENT VARIABLES
-      # --------------------------------------------------------
-
       Environment:
-
         Variables:
+          REPORTS_BUCKET: !Ref ReportsBucketName
+          DB_HOST_PARAMETER: !Ref DbHostParameterName
+          DB_PORT_PARAMETER: !Ref DbPortParameterName
+          DB_NAME_PARAMETER: !Ref DbNameParameterName
+          DB_USERNAME_PARAMETER: !Ref DbUsernameParameterName
+          DB_PASSWORD_PARAMETER: !Ref DbPasswordParameterName
 
-          REPORTS_BUCKET:
-            !Ref ReportsBucketName
-
-          DB_HOST_PARAMETER:
-            !Ref DbHostParameterName
-
-          DB_PORT_PARAMETER:
-            !Ref DbPortParameterName
-
-          DB_NAME_PARAMETER:
-            !Ref DbNameParameterName
-
-          DB_USERNAME_PARAMETER:
-            !Ref DbUsernameParameterName
-
-          DB_PASSWORD_PARAMETER:
-            !Ref DbPasswordParameterName
-
-
-      # --------------------------------------------------------
-      # TAGS
-      # --------------------------------------------------------
-
-      Tags:
-
-        - Key: Project
-          Value: CloudMart
-
-        - Key: Environment
-          Value: !Ref Environment
-
-
-  # ============================================================
-  # REPORT GENERATOR LAMBDA CLOUDWATCH LOG GROUP
-  # ============================================================
-
-  ReportGeneratorLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName:
-        !Sub /aws/lambda/CloudMart-${Environment}-ReportGenerator
-      RetentionInDays: 14
       Tags:
         - Key: Project
           Value: CloudMart
         - Key: Environment
           Value: !Ref Environment
-
-
-  # ============================================================
-  # EVENTBRIDGE DAILY REPORT SCHEDULE
-  # ============================================================
 
   DailyReportSchedule:
     Type: AWS::Events::Rule
-
     Properties:
+      Name: !Sub CloudMart-${Environment}-DailyReport
+      Description: !Sub Daily CloudMart report generation for ${Environment}
 
-      Name:
-        !Sub CloudMart-${Environment}-DailyReport
-
-      Description:
-        !Sub Daily CloudMart report generation for ${Environment}
-
-
-      # --------------------------------------------------------
       # 03:00 UTC = 08:30 IST
-      # --------------------------------------------------------
-
-      ScheduleExpression:
-        cron(0 3 * * ? *)
-
+      ScheduleExpression: cron(0 3 * * ? *)
       State: ENABLED
 
       Targets:
-
-        # --------------------------------------------------------
-        # TARGET 1 - REPORT GENERATOR LAMBDA
-        # --------------------------------------------------------
-
-        - Arn:
-            !GetAtt ReportGeneratorLambda.Arn
-
-          Id:
-            ReportGeneratorTarget
-
+        - Arn: !GetAtt ReportGeneratorLambda.Arn
+          Id: ReportGeneratorTarget
           RetryPolicy:
             MaximumEventAgeInSeconds: 3600
             MaximumRetryAttempts: 3
 
-        # --------------------------------------------------------
-        # TARGET 2 - CLOUDWATCH LOGS
-        # --------------------------------------------------------
-
-        - Arn:
-            !GetAtt ReportingEventBridgeLogGroup.Arn
-
-          Id:
-            ReportingEventBridgeLogTarget
-
-
-  # ============================================================
-  # EVENTBRIDGE CLOUDWATCH LOG GROUP
-  # ============================================================
+        - Arn: !GetAtt ReportingEventBridgeLogGroup.Arn
+          Id: ReportingEventBridgeLogTarget
 
   ReportingEventBridgeLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName:
-        !Sub /aws/events/CloudMart-${Environment}-Reporting
+      LogGroupName: !Sub /aws/events/CloudMart-${Environment}-Reporting
       RetentionInDays: 14
       Tags:
         - Key: Project
@@ -294,16 +163,10 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
-
-  # ============================================================
-  # ALLOW EVENTBRIDGE TO WRITE TO CLOUDWATCH LOGS
-  # ============================================================
-
   ReportingEventBridgeLogPolicy:
     Type: AWS::Logs::ResourcePolicy
     Properties:
-      PolicyName:
-        !Sub CloudMart-${Environment}-ReportingEventBridgeLogsPolicy
+      PolicyName: !Sub CloudMart-${Environment}-ReportingEventBridgeLogsPolicy
       PolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -314,176 +177,166 @@ Resources:
             Action:
               - logs:CreateLogStream
               - logs:PutLogEvents
-            Resource:
-              !Sub ${ReportingEventBridgeLogGroup.Arn}:*
+            Resource: !Sub ${ReportingEventBridgeLogGroup.Arn}:*
             Condition:
               StringEquals:
-                aws:SourceAccount:
-                  !Ref AWS::AccountId
-
-
-  # ============================================================
-  # ALLOW EVENTBRIDGE TO INVOKE REPORT LAMBDA
-  # ============================================================
+                aws:SourceAccount: !Ref AWS::AccountId
 
   ReportLambdaPermission:
     Type: AWS::Lambda::Permission
-
     Properties:
-
-      FunctionName:
-        !Ref ReportGeneratorLambda
-
-      Action:
-        lambda:InvokeFunction
-
-      Principal:
-        events.amazonaws.com
-
-      SourceArn:
-        !GetAtt DailyReportSchedule.Arn
-
-
-  # ============================================================
-  # EC2 FLASK DASHBOARD
-  # ============================================================
+      FunctionName: !Ref ReportGeneratorLambda
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt DailyReportSchedule.Arn
 
   DashboardEC2:
     Type: AWS::EC2::Instance
-
     Properties:
 
-      # --------------------------------------------------------
-      # AMAZON LINUX 2023
-      # --------------------------------------------------------
-
-      ImageId:
-        !Ref LatestAmiId
-
-
-      # --------------------------------------------------------
-      # INSTANCE SIZE
-      # --------------------------------------------------------
-
-      InstanceType:
-        !Ref InstanceType
-
-
-      # --------------------------------------------------------
-      # EXISTING SECURITY STACK INSTANCE PROFILE
-      # --------------------------------------------------------
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
 
       IamInstanceProfile:
         Fn::ImportValue:
           !Sub CloudMart-${Environment}-DashboardInstanceProfileName
 
-
-      # --------------------------------------------------------
-      # EXISTING NETWORK PUBLIC SUBNET
-      # --------------------------------------------------------
-
       SubnetId:
         Fn::ImportValue:
           !Sub CloudMart-${Environment}-PublicSubnetId
 
-
-      # --------------------------------------------------------
-      # EXISTING EC2 DASHBOARD SECURITY GROUP
-      # --------------------------------------------------------
-
       SecurityGroupIds:
-
         - Fn::ImportValue:
             !Sub CloudMart-${Environment}-EC2SecurityGroupId
 
-
-      # --------------------------------------------------------
-      # TAGS
-      # --------------------------------------------------------
-
       Tags:
-
         - Key: Name
-          Value:
-            !Sub CloudMart-${Environment}-Dashboard
-
+          Value: !Sub CloudMart-${Environment}-Dashboard
         - Key: Project
           Value: CloudMart
-
         - Key: Environment
-          Value:
-            !Ref Environment
-
-
-      # ========================================================
-      # USER DATA
-      # ========================================================
+          Value: !Ref Environment
 
       UserData:
         Fn::Base64: !Sub |
-            #!/bin/bash
-            set -e
-            export ENVIRONMENT='${Environment}'
-            export AWS_REGION='${AWS::Region}'
-            export REPORTS_BUCKET='${ReportsBucketName}'
-            cat > /tmp/cloudmart-userdata.gz.b64 <<'CLOUDMART_GZIP'
-            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
-            XsD3LzvmuRygUAAA
-            CLOUDMART_GZIP
-            base64 -d /tmp/cloudmart-userdata.gz.b64 | gzip -d > /tmp/cloudmart-userdata.sh
-            chmod +x /tmp/cloudmart-userdata.sh
-            /bin/bash /tmp/cloudmart-userdata.sh
+          #!/bin/bash
+          set -euo pipefail
 
-  # ============================================================
-  # DASHBOARD ELASTIC IP
-  # ============================================================
+          exec > >(tee /var/log/cloudmart-dashboard-userdata.log | logger -t cloudmart-dashboard-userdata -s 2>/dev/console) 2>&1
+
+          echo "Starting CloudMart dashboard bootstrap..."
+
+          export ENVIRONMENT='${Environment}'
+          export AWS_REGION='${AWS::Region}'
+          export REPORTS_BUCKET='${ReportsBucketName}'
+          export SESSION_TIMEOUT_MINUTES='60'
+
+          DASHBOARD_DIR="/opt/cloudmart-dashboard"
+
+          mkdir -p "${DASHBOARD_DIR}"
+          cd "${DASHBOARD_DIR}"
+
+          echo "Installing system packages..."
+          dnf install -y python3 python3-pip nginx
+
+          echo "Downloading dashboard source files from S3..."
+
+          aws s3 cp \
+            "s3://${DashboardS3Bucket}/${DashboardS3Prefix}/app.py" \
+            "${DASHBOARD_DIR}/app.py"
+
+          aws s3 cp \
+            "s3://${DashboardS3Bucket}/${DashboardS3Prefix}/index.html" \
+            "${DASHBOARD_DIR}/index.html"
+
+          aws s3 cp \
+            "s3://${DashboardS3Bucket}/${DashboardS3Prefix}/login.html" \
+            "${DASHBOARD_DIR}/login.html"
+
+          echo "Dashboard source files downloaded."
+
+          test -s "${DASHBOARD_DIR}/app.py"
+          test -s "${DASHBOARD_DIR}/index.html"
+          test -s "${DASHBOARD_DIR}/login.html"
+
+          echo "Installing Python dependencies..."
+          python3 -m pip install --upgrade pip
+          python3 -m pip install Flask boto3 PyMySQL gunicorn
+
+          echo "Creating systemd service..."
+
+          cat > /etc/systemd/system/cloudmart-dashboard.service <<SERVICE
+          [Unit]
+          Description=CloudMart Flask Dashboard
+          After=network-online.target
+          Wants=network-online.target
+
+          [Service]
+          Type=simple
+          User=root
+          WorkingDirectory=/opt/cloudmart-dashboard
+
+          Environment="ENVIRONMENT=${Environment}"
+          Environment="AWS_REGION=${AWS::Region}"
+          Environment="REPORTS_BUCKET=${ReportsBucketName}"
+          Environment="SESSION_TIMEOUT_MINUTES=60"
+
+          ExecStart=/usr/local/bin/gunicorn \
+            --workers 2 \
+            --bind 127.0.0.1:5000 \
+            --access-logfile - \
+            --error-logfile - \
+            app:app
+
+          Restart=always
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+          SERVICE
+
+          echo "Creating Nginx configuration..."
+
+          cat > /etc/nginx/conf.d/cloudmart-dashboard.conf <<'NGINX'
+          server {
+              listen 80;
+              server_name _;
+
+              client_max_body_size 10M;
+
+              location / {
+                  proxy_pass http://127.0.0.1:5000;
+
+                  proxy_set_header Host $host;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  proxy_set_header X-Forwarded-Proto $scheme;
+              }
+          }
+          NGINX
+
+          echo "Validating Python application..."
+          python3 -m py_compile "${DASHBOARD_DIR}/app.py"
+
+          echo "Starting CloudMart dashboard..."
+          systemctl daemon-reload
+          systemctl enable cloudmart-dashboard
+          systemctl restart cloudmart-dashboard
+
+          sleep 5
+
+          echo "Checking Flask dashboard health..."
+          curl --fail --silent --show-error \
+            http://127.0.0.1:5000/health
+
+          echo
+          echo "Validating Nginx configuration..."
+          nginx -t
+
+          systemctl enable nginx
+          systemctl restart nginx
+
+          echo "CloudMart dashboard deployed successfully."
 
   DashboardElasticIP:
     Type: AWS::EC2::EIP
@@ -497,102 +350,42 @@ Resources:
         - Key: Environment
           Value: !Ref Environment
 
-
-  # ============================================================
-  # ASSOCIATE ELASTIC IP WITH DASHBOARD EC2
-  # ============================================================
-
   DashboardElasticIPAssociation:
     Type: AWS::EC2::EIPAssociation
     Properties:
-      InstanceId:
-        !Ref DashboardEC2
-      AllocationId:
-        !GetAtt DashboardElasticIP.AllocationId
-
-
-# ============================================================
-# OUTPUTS
-# ============================================================
+      InstanceId: !Ref DashboardEC2
+      AllocationId: !GetAtt DashboardElasticIP.AllocationId
 
 Outputs:
 
-
-  # ============================================================
-  # EXISTING REPORTS BUCKET
-  # ============================================================
-
   ReportsBucketName:
-
-    Description:
-      Existing CloudMart reports S3 bucket
-
-    Value:
-      !Ref ReportsBucketName
-
-
-  # ============================================================
-  # REPORT LAMBDA
-  # ============================================================
+    Description: Existing CloudMart reports S3 bucket
+    Value: !Ref ReportsBucketName
 
   ReportLambdaName:
-
-    Description:
-      CloudMart Report Generator Lambda
-
-    Value:
-      !Ref ReportGeneratorLambda
-
+    Description: CloudMart Report Generator Lambda
+    Value: !Ref ReportGeneratorLambda
 
   ReportLambdaArn:
-
-    Description:
-      CloudMart Report Generator Lambda ARN
-
-    Value:
-      !GetAtt ReportGeneratorLambda.Arn
-
-
-  # ============================================================
-  # DAILY REPORT EVENTBRIDGE RULE
-  # ============================================================
+    Description: CloudMart Report Generator Lambda ARN
+    Value: !GetAtt ReportGeneratorLambda.Arn
 
   DailyReportRuleArn:
-
-    Description:
-      Daily report EventBridge rule ARN
-
-    Value:
-      !GetAtt DailyReportSchedule.Arn
-
-
-  # ============================================================
-  # DASHBOARD INSTANCE
-  # ============================================================
+    Description: Daily report EventBridge rule ARN
+    Value: !GetAtt DailyReportSchedule.Arn
 
   DashboardInstanceId:
-
-    Description:
-      CloudMart dashboard EC2 instance ID
-
-    Value:
-      !Ref DashboardEC2
-
+    Description: CloudMart dashboard EC2 instance ID
+    Value: !Ref DashboardEC2
 
   DashboardPublicIp:
-
-    Description:
-      CloudMart dashboard Elastic IP
-
-    Value:
-      !Ref DashboardElasticIP
-
+    Description: CloudMart dashboard Elastic IP
+    Value: !Ref DashboardElasticIP
 
   DashboardURL:
+    Description: CloudMart dashboard URL
+    Value: !Sub http://${DashboardElasticIP}
 
-    Description:
-      CloudMart dashboard URL
-
-    Value:
-      !Sub
-        http://${DashboardElasticIP}
+  DashboardSourceLocation:
+    Description: S3 location used by the EC2 dashboard bootstrap
+    Value: !Sub s3://${DashboardS3Bucket}/${DashboardS3Prefix}/
