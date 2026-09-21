@@ -233,8 +233,8 @@ Resources:
 
           DASHBOARD_DIR="/opt/cloudmart-dashboard"
 
-          mkdir -p "${DASHBOARD_DIR}"
-          cd "${DASHBOARD_DIR}"
+          mkdir -p "$DASHBOARD_DIR"
+          cd "$DASHBOARD_DIR"
 
           echo "Installing system packages..."
           dnf install -y python3 python3-pip nginx
@@ -243,21 +243,21 @@ Resources:
 
           aws s3 cp \
             "s3://${DashboardS3Bucket}/${DashboardS3Prefix}/app.py" \
-            "${DASHBOARD_DIR}/app.py"
+            "$DASHBOARD_DIR/app.py"
 
           aws s3 cp \
             "s3://${DashboardS3Bucket}/${DashboardS3Prefix}/index.html" \
-            "${DASHBOARD_DIR}/index.html"
+            "$DASHBOARD_DIR/index.html"
 
           aws s3 cp \
             "s3://${DashboardS3Bucket}/${DashboardS3Prefix}/login.html" \
-            "${DASHBOARD_DIR}/login.html"
+            "$DASHBOARD_DIR/login.html"
 
           echo "Dashboard source files downloaded."
 
-          test -s "${DASHBOARD_DIR}/app.py"
-          test -s "${DASHBOARD_DIR}/index.html"
-          test -s "${DASHBOARD_DIR}/login.html"
+          test -s "$DASHBOARD_DIR/app.py"
+          test -s "$DASHBOARD_DIR/index.html"
+          test -s "$DASHBOARD_DIR/login.html"
 
           echo "Installing Python dependencies..."
           python3 -m pip install --upgrade pip
@@ -316,7 +316,7 @@ Resources:
           NGINX
 
           echo "Validating Python application..."
-          python3 -m py_compile "${DASHBOARD_DIR}/app.py"
+          python3 -m py_compile "$DASHBOARD_DIR/app.py"
 
           echo "Starting CloudMart dashboard..."
           systemctl daemon-reload
