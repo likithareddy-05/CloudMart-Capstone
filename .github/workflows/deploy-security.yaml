@@ -19,6 +19,8 @@ env:
   ENVIRONMENT: dev
 
   STACK_NAME: cloudmart-dev-security
+  DASHBOARD_S3_BUCKET: cloudmart-dev-reports-430155298316
+  DASHBOARD_S3_PREFIX: cloudmart-dashboard
 
 
 jobs:
@@ -120,6 +122,8 @@ jobs:
             --template-body file://cloudformation/Security-stack.yaml \
             --parameters \
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+              ParameterKey=DashboardS3Bucket,ParameterValue="$DASHBOARD_S3_BUCKET" \
+              ParameterKey=DashboardS3Prefix,ParameterValue="$DASHBOARD_S3_PREFIX" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"
 
@@ -158,6 +162,8 @@ jobs:
             --template-body file://cloudformation/Security-stack.yaml \
             --parameters \
               ParameterKey=Environment,ParameterValue="$ENVIRONMENT" \
+              ParameterKey=DashboardS3Bucket,ParameterValue="$DASHBOARD_S3_BUCKET" \
+              ParameterKey=DashboardS3Prefix,ParameterValue="$DASHBOARD_S3_PREFIX" \
             --capabilities CAPABILITY_NAMED_IAM \
             --region "$AWS_REGION"
 
