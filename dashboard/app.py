@@ -1,29 +1,99 @@
+import os
 import hashlib
 import logging
-import os
-import time
-from datetime import datetime
-from io import BytesIO
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
+from functools import wraps
 
 import boto3
 import pymysql
 from flask import (
     Flask,
-    redirect,
     render_template,
     request,
-    send_file,
-    session,
+    redirect,
     url_for,
+    session,
+    send_file,
+    flash
 )
 
 
-BASE_DIR = Path(__file__).resolve().parent
+# ============================================================
+# LOGGING
+# ============================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s"
+)
+
+logger = logging.getLogger("cloudmart-dashboard")
+
+
+# ============================================================
+# APPLICATION
+# ============================================================
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 app = Flask(
     __name__,
-    template_folder=str(BASE_DIR)
+    template_folder=BASE_DIR
+)
+
+
+# ============================================================
+# ENVIRONMENT
+# ============================================================
+
+ENVIRONMENT = os.getenv(
+    "ENVIRONMENT",
+    "dev"
+).lower()
+
+
+# ============================================================
+# AWS CONFIGURATION
+# ============================================================
+
+AWS_REGION = os.getenv(
+    "AWS_REGION",
+    "ap-south-1"
+)
+
+REPORTS_BUCKET = os.getenv(
+    "REPORTS_BUCKET",
+    "cloudmart-dev-reports-430155298316"
+)
+
+
+# ============================================================
+# SSM PARAMETER NAMES
+# ============================================================
+
+DB_HOST_PARAMETER = os.getenv(
+    "DB_HOST_PARAMETER",
+    "/cloudmart/dev/db/host"
+)
+
+DB_PORT_PARAMETER = os.getenv(
+    "DB_PORT_PARAMETER",
+    "/cloudmart/dev/db/port"
+)
+
+DB_NAME_PARAMETER = os.getenv(
+    "DB_NAME_PARAMETER",
+    "/cloudmart/dev/db/name"
+)
+
+DB_USERNAME_PARAMETER = os.getenv(
+    "DB_USERNAME_PARAMETER",
+    "/cloudmart/dev/db/username"
+)
+
+DB_PASSWORD_PARAMETER = os.getenv(
+    "DB_PASSWORD_PARAMETER",
+    "/cloudmart/dev/db/password"
 )
 
 
@@ -31,211 +101,247 @@ app = Flask(
 # SESSION CONFIGURATION
 # ============================================================
 
-# Admin session expires after 60 minutes of inactivity.
-# This is NOT related to report downloads.
-SESSION_TIMEOUT_MINUTES = int(
-    os.environ.get(
-        "SESSION_TIMEOUT_MINUTES",
-        "60"
-    )
-)
+SESSION_TIMEOUT_MINUTES = 60
 
-SESSION_TIMEOUT_SECONDS = (
-    SESSION_TIMEOUT_MINUTES * 60
-)
+SESSION_SECRET_FILE = "/etc/cloudmart-dashboard-secret"
 
 
-# ============================================================
-# FLASK SECRET
-# ============================================================
+def load_session_secret():
 
-DASHBOARD_SECRET_FILE = (
-    "/etc/cloudmart-dashboard-secret"
-)
+    """
+    Load the Flask session secret.
 
-try:
+    The secret is stored on the EC2 instance instead of
+    hard-coding it inside the source code.
+    """
 
-    with open(
-        DASHBOARD_SECRET_FILE,
-        "r",
-        encoding="utf-8"
-    ) as secret_file:
+    try:
 
-        app.secret_key = (
-            secret_file.read().strip()
+        if os.path.exists(SESSION_SECRET_FILE):
+
+            with open(
+                SESSION_SECRET_FILE,
+                "r",
+                encoding="utf-8"
+            ) as secret_file:
+
+                secret = secret_file.read().strip()
+
+                if secret:
+                    return secret
+
+    except Exception as error:
+
+        logger.warning(
+            "Unable to read session secret file: %s",
+            error
         )
 
-except (
-    FileNotFoundError,
-    PermissionError,
-    OSError
-):
 
-    app.secret_key = os.environ.get(
-        "DASHBOARD_SECRET_KEY",
-        ""
+    # Development fallback.
+    # In the deployed EC2 environment the file is created
+    # by the CloudFormation UserData.
+    return os.getenv(
+        "FLASK_SECRET_KEY",
+        "cloudmart-development-secret-change-me"
     )
 
 
-if not app.secret_key:
+app.secret_key = load_session_secret()
 
-    raise RuntimeError(
-        "Dashboard session secret is not configured. "
-        "Create /etc/cloudmart-dashboard-secret "
-        "or set DASHBOARD_SECRET_KEY."
-    )
-
-
-app.config.update(
-
-    SESSION_COOKIE_HTTPONLY=True,
-
-    SESSION_COOKIE_SAMESITE="Lax",
-
-    PERMANENT_SESSION_LIFETIME=(
-        SESSION_TIMEOUT_SECONDS
-    )
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
+    minutes=SESSION_TIMEOUT_MINUTES
 )
 
+app.config["SESSION_COOKIE_HTTPONLY"] = True
 
-logging.basicConfig(
-    level=logging.INFO
-)
-
-
-# ============================================================
-# ENVIRONMENT / AWS CONFIGURATION
-# ============================================================
-
-ENVIRONMENT = os.environ.get(
-    "ENVIRONMENT",
-    "dev"
-)
-
-
-AWS_REGION = os.environ.get(
-    "AWS_REGION",
-    "ap-south-1"
-)
-
-
-REPORTS_BUCKET = os.environ.get(
-    "REPORTS_BUCKET"
-)
-
-
-# ============================================================
-# CLOUDMART SSM PATHS
-# ============================================================
-
-DB_HOST_PARAMETER = (
-    f"/cloudmart/{ENVIRONMENT}/db/host"
-)
-
-DB_PORT_PARAMETER = (
-    f"/cloudmart/{ENVIRONMENT}/db/port"
-)
-
-DB_NAME_PARAMETER = (
-    f"/cloudmart/{ENVIRONMENT}/db/name"
-)
-
-DB_USERNAME_PARAMETER = (
-    f"/cloudmart/{ENVIRONMENT}/db/username"
-)
-
-DB_PASSWORD_PARAMETER = (
-    f"/cloudmart/{ENVIRONMENT}/db/password"
-)
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
 
 # ============================================================
 # AWS CLIENTS
 # ============================================================
 
-ssm = boto3.client(
-    "ssm",
+session_boto = boto3.Session(
     region_name=AWS_REGION
 )
 
+ssm = session_boto.client("ssm")
 
-s3 = boto3.client(
-    "s3",
-    region_name=AWS_REGION
-)
-
-
-# ============================================================
-# GET SSM PARAMETER
-# ============================================================
-
-def get_parameter(name):
-
-    result = ssm.get_parameter(
-        Name=name,
-        WithDecryption=True
-    )
-
-    return result[
-        "Parameter"
-    ][
-        "Value"
-    ]
+s3 = session_boto.client("s3")
 
 
 # ============================================================
 # DATABASE CONNECTION
 # ============================================================
 
+def get_ssm_parameter(parameter_name, with_decryption=False):
+
+    response = ssm.get_parameter(
+        Name=parameter_name,
+        WithDecryption=with_decryption
+    )
+
+    return response["Parameter"]["Value"]
+
+
 def get_db_connection():
 
-    host = get_parameter(
+    """
+    Get database connection information from SSM Parameter Store
+    and create a MySQL connection to RDS.
+    """
+
+    db_host = get_ssm_parameter(
         DB_HOST_PARAMETER
     )
 
-    port = int(
-        get_parameter(
+    db_port = int(
+        get_ssm_parameter(
             DB_PORT_PARAMETER
         )
     )
 
-    database = get_parameter(
+    db_name = get_ssm_parameter(
         DB_NAME_PARAMETER
     )
 
-    username = get_parameter(
+    db_username = get_ssm_parameter(
         DB_USERNAME_PARAMETER
     )
 
-    password = get_parameter(
-        DB_PASSWORD_PARAMETER
+    db_password = get_ssm_parameter(
+        DB_PASSWORD_PARAMETER,
+        with_decryption=True
     )
 
-    return pymysql.connect(
 
-        host=host,
-
-        port=port,
-
-        user=username,
-
-        password=password,
-
-        database=database,
-
+    connection = pymysql.connect(
+        host=db_host,
+        port=db_port,
+        user=db_username,
+        password=db_password,
+        database=db_name,
+        cursorclass=pymysql.cursors.DictCursor,
         connect_timeout=10,
+        read_timeout=15,
+        write_timeout=15,
+        autocommit=True
+    )
 
-        cursorclass=(
-            pymysql.cursors.DictCursor
-        )
+    return connection
+
+
+# ============================================================
+# AUTHENTICATION HELPERS
+# ============================================================
+
+def hash_token(token):
+
+    return hashlib.sha256(
+        token.encode("utf-8")
+    ).hexdigest()
+
+
+def is_authenticated():
+
+    return (
+        session.get("authenticated") is True
+        and session.get("admin_role") == "ADMIN"
     )
 
 
+def login_required(function):
+
+    @wraps(function)
+    def decorated_function(*args, **kwargs):
+
+        if not is_authenticated():
+
+            return redirect(
+                url_for("index")
+            )
+
+        return function(*args, **kwargs)
+
+    return decorated_function
+
+
 # ============================================================
-# PRODUCTS / INVENTORY
+# SESSION ACTIVITY
 # ============================================================
 
-def get_products():
+@app.before_request
+def refresh_session_activity():
+
+    """
+    Keep the session alive while the administrator is active.
+
+    Every request resets the inactivity timer.
+
+    After 60 minutes without a request, the session expires.
+    """
+
+    if request.endpoint == "static":
+        return
+
+    if not session.get("authenticated"):
+        return
+
+    last_activity = session.get(
+        "last_activity"
+    )
+
+    if not last_activity:
+
+        session.clear()
+        return
+
+    try:
+
+        last_activity_time = datetime.fromisoformat(
+            last_activity
+        )
+
+        current_time = datetime.now(
+            timezone.utc
+        )
+
+        elapsed = (
+            current_time - last_activity_time
+        ).total_seconds()
+
+        if elapsed > SESSION_TIMEOUT_MINUTES * 60:
+
+            session.clear()
+
+            if request.endpoint != "index":
+
+                return redirect(
+                    url_for("index")
+                )
+
+            return
+
+
+        # Activity detected.
+        # Reset the inactivity timer.
+        session["last_activity"] = (
+            current_time.isoformat()
+        )
+
+        session.permanent = True
+
+    except Exception:
+
+        session.clear()
+
+
+# ============================================================
+# DATABASE QUERY HELPER
+# ============================================================
+
+def execute_query(query, params=None):
 
     connection = None
 
@@ -246,20 +352,8 @@ def get_products():
         with connection.cursor() as cursor:
 
             cursor.execute(
-                """
-                SELECT
-                    p.product_id AS id,
-                    p.name,
-                    p.description,
-                    p.price,
-                    p.category,
-                    i.stock_count
-                FROM products p
-                INNER JOIN inventory i
-                    ON p.product_id = i.product_id
-                WHERE p.is_deleted = FALSE
-                ORDER BY p.product_id
-                """
+                query,
+                params or ()
             )
 
             return cursor.fetchall()
@@ -267,99 +361,498 @@ def get_products():
     finally:
 
         if connection:
+
             connection.close()
 
 
 # ============================================================
-# RECENT ORDER ITEMS
-# ============================================================
-
-def get_recent_orders():
-
-    connection = None
-
-    try:
-
-        connection = get_db_connection()
-
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                """
-                SELECT
-                    o.order_id AS order_id,
-                    o.customer_id,
-                    o.status,
-                    o.created_at,
-                    oi.order_item_id,
-                    oi.product_id,
-                    p.name AS product_name,
-                    oi.quantity,
-                    oi.unit_price AS price,
-                    oi.subtotal
-                FROM orders o
-                INNER JOIN order_items oi
-                    ON o.order_id = oi.order_id
-                INNER JOIN products p
-                    ON oi.product_id = p.product_id
-                WHERE p.is_deleted = FALSE
-                ORDER BY
-                    o.created_at DESC,
-                    oi.order_item_id DESC
-                LIMIT 50
-                """
-            )
-
-            return cursor.fetchall()
-
-    finally:
-
-        if connection:
-            connection.close()
-
-
-# ============================================================
-# RECENT ORDER SUMMARY
-# ============================================================
-
-def get_recent_order_summaries():
-
-    connection = None
-
-    try:
-
-        connection = get_db_connection()
-
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-                """
-                SELECT
-                    o.order_id,
-                    o.customer_id,
-                    o.total_amount,
-                    o.status,
-                    o.created_at
-                FROM orders o
-                ORDER BY o.created_at DESC
-                LIMIT 100
-                """
-            )
-
-            return cursor.fetchall()
-
-    finally:
-
-        if connection:
-            connection.close()
-
-
-# ============================================================
-# DASHBOARD KPI DATA
+# DASHBOARD STATISTICS
 # ============================================================
 
 def get_dashboard_stats():
 
+    stats = {
+        "total_orders": 0,
+        "confirmed_orders": 0,
+        "failed_orders": 0,
+        "order_items": 0,
+        "active_products": 0,
+        "total_users": 0,
+        "total_revenue": 0,
+        "reports_generated": 0
+    }
+
+
+    # --------------------------------------------------------
+    # TOTAL ORDERS
+    # --------------------------------------------------------
+
+    result = execute_query(
+        """
+        SELECT COUNT(*) AS count
+        FROM orders
+        """
+    )
+
+    stats["total_orders"] = result[0]["count"]
+
+
+    # --------------------------------------------------------
+    # CONFIRMED ORDERS
+    # --------------------------------------------------------
+
+    result = execute_query(
+        """
+        SELECT COUNT(*) AS count
+        FROM orders
+        WHERE UPPER(status) = 'CONFIRMED'
+        """
+    )
+
+    stats["confirmed_orders"] = result[0]["count"]
+
+
+    # --------------------------------------------------------
+    # FAILED ORDERS
+    # --------------------------------------------------------
+
+    result = execute_query(
+        """
+        SELECT COUNT(*) AS count
+        FROM orders
+        WHERE UPPER(status) = 'FAILED'
+        """
+    )
+
+    stats["failed_orders"] = result[0]["count"]
+
+
+    # --------------------------------------------------------
+    # ORDER ITEMS
+    # --------------------------------------------------------
+
+    result = execute_query(
+        """
+        SELECT COUNT(*) AS count
+        FROM order_items
+        """
+    )
+
+    stats["order_items"] = result[0]["count"]
+
+
+    # --------------------------------------------------------
+    # ACTIVE PRODUCTS
+    # --------------------------------------------------------
+
+    result = execute_query(
+        """
+        SELECT COUNT(*) AS count
+        FROM products
+        WHERE is_deleted = FALSE
+        """
+    )
+
+    stats["active_products"] = result[0]["count"]
+
+
+    # --------------------------------------------------------
+    # USERS
+    # --------------------------------------------------------
+
+    result = execute_query(
+        """
+        SELECT COUNT(*) AS count
+        FROM users
+        """
+    )
+
+    stats["total_users"] = result[0]["count"]
+
+
+    # --------------------------------------------------------
+    # TOTAL REVENUE
+    #
+    # Revenue is calculated from CONFIRMED orders only.
+    # --------------------------------------------------------
+
+    result = execute_query(
+        """
+        SELECT COALESCE(
+            SUM(total_amount),
+            0
+        ) AS revenue
+        FROM orders
+        WHERE UPPER(status) = 'CONFIRMED'
+        """
+    )
+
+    stats["total_revenue"] = (
+        result[0]["revenue"] or 0
+    )
+
+
+    # --------------------------------------------------------
+    # REPORT COUNT
+    # --------------------------------------------------------
+
+    try:
+
+        response = s3.list_objects_v2(
+            Bucket=REPORTS_BUCKET,
+            Prefix="reports/"
+        )
+
+        reports = response.get(
+            "Contents",
+            []
+        )
+
+        stats["reports_generated"] = len(
+            [
+                item
+                for item in reports
+                if item["Key"].lower().endswith(".csv")
+            ]
+        )
+
+    except Exception as error:
+
+        logger.warning(
+            "Unable to count reports: %s",
+            error
+        )
+
+        stats["reports_generated"] = 0
+
+
+    return stats
+
+
+# ============================================================
+# PRODUCTS
+# ============================================================
+
+def get_products():
+
+    return execute_query(
+        """
+        SELECT
+            p.product_id,
+            p.name,
+            p.category,
+            p.price,
+            p.is_deleted,
+            COALESCE(
+                i.stock_count,
+                0
+            ) AS stock_count,
+            COALESCE(
+                i.low_stock_threshold,
+                0
+            ) AS low_stock_threshold
+        FROM products p
+        LEFT JOIN inventory i
+            ON p.product_id = i.product_id
+        ORDER BY p.product_id
+        """
+    )
+
+
+# ============================================================
+# USERS
+# ============================================================
+
+def get_users():
+
+    return execute_query(
+        """
+        SELECT
+            user_id,
+            name,
+            email,
+            role,
+            created_at,
+            updated_at
+        FROM users
+        ORDER BY user_id
+        """
+    )
+
+
+# ============================================================
+# INVENTORY
+# ============================================================
+
+def get_inventory():
+
+    return execute_query(
+        """
+        SELECT
+            i.inventory_id,
+            i.product_id,
+            p.name AS product_name,
+            i.stock_count,
+            i.low_stock_threshold,
+            i.updated_at
+        FROM inventory i
+        INNER JOIN products p
+            ON i.product_id = p.product_id
+        ORDER BY i.product_id
+        """
+    )
+
+
+# ============================================================
+# ORDER ITEMS
+# ============================================================
+
+def get_order_items():
+
+    return execute_query(
+        """
+        SELECT
+            oi.order_item_id,
+            oi.order_id,
+            oi.product_id,
+            p.name AS product_name,
+            oi.quantity,
+            oi.unit_price,
+            oi.subtotal
+        FROM order_items oi
+        INNER JOIN products p
+            ON oi.product_id = p.product_id
+        ORDER BY oi.order_item_id DESC
+        LIMIT 200
+        """
+    )
+
+
+# ============================================================
+# ORDERS
+# ============================================================
+
+def get_orders():
+
+    return execute_query(
+        """
+        SELECT
+            o.order_id,
+            o.customer_id,
+            u.name AS customer_name,
+            u.email AS customer_email,
+            o.total_amount,
+            o.status,
+            o.failure_reason,
+            o.created_at,
+            o.updated_at
+        FROM orders o
+        LEFT JOIN users u
+            ON o.customer_id = u.user_id
+        ORDER BY o.created_at DESC
+        LIMIT 200
+        """
+    )
+
+
+# ============================================================
+# REPORTS
+# ============================================================
+
+def get_reports():
+
+    reports = []
+
+    try:
+
+        response = s3.list_objects_v2(
+            Bucket=REPORTS_BUCKET,
+            Prefix="reports/"
+        )
+
+        for item in response.get(
+            "Contents",
+            []
+        ):
+
+            key = item["Key"]
+
+            if not key.lower().endswith(".csv"):
+                continue
+
+            reports.append(
+                {
+                    "key": key,
+                    "name": key.split("/")[-1],
+                    "size": item.get("Size", 0),
+                    "last_modified": item.get(
+                        "LastModified"
+                    )
+                }
+            )
+
+    except Exception as error:
+
+        logger.exception(
+            "Unable to load reports: %s",
+            error
+        )
+
+
+    reports.sort(
+        key=lambda item: item["last_modified"] or datetime.min.replace(
+            tzinfo=timezone.utc
+        ),
+        reverse=True
+    )
+
+    return reports
+
+
+# ============================================================
+# LOGIN
+# ============================================================
+
+@app.route(
+    "/",
+    methods=["GET"]
+)
+def index():
+
+    if is_authenticated():
+
+        try:
+
+            stats = get_dashboard_stats()
+
+            products = get_products()
+
+            users = get_users()
+
+            inventory = get_inventory()
+
+            order_items = get_order_items()
+
+            orders = get_orders()
+
+            reports = get_reports()
+
+
+            return render_template(
+                "index.html",
+                authenticated=True,
+                admin_name=session.get(
+                    "admin_name",
+                    "Administrator"
+                ),
+                admin_role=session.get(
+                    "admin_role",
+                    "ADMIN"
+                ),
+                stats=stats,
+                products=products,
+                users=users,
+                inventory=inventory,
+                order_items=order_items,
+                orders=orders,
+                reports=reports,
+                environment=ENVIRONMENT.upper(),
+                session_timeout_minutes=SESSION_TIMEOUT_MINUTES
+            )
+
+        except Exception as error:
+
+            logger.exception(
+                "Dashboard loading failed"
+            )
+
+            return render_template(
+                "index.html",
+                authenticated=True,
+                admin_name=session.get(
+                    "admin_name",
+                    "Administrator"
+                ),
+                admin_role=session.get(
+                    "admin_role",
+                    "ADMIN"
+                ),
+                stats={
+                    "total_orders": 0,
+                    "confirmed_orders": 0,
+                    "failed_orders": 0,
+                    "order_items": 0,
+                    "active_products": 0,
+                    "total_users": 0,
+                    "total_revenue": 0,
+                    "reports_generated": 0
+                },
+                products=[],
+                users=[],
+                inventory=[],
+                order_items=[],
+                orders=[],
+                reports=[],
+                environment=ENVIRONMENT.upper(),
+                session_timeout_minutes=SESSION_TIMEOUT_MINUTES,
+                dashboard_error=str(error)
+            )
+
+
+    # --------------------------------------------------------
+    # LOGIN PAGE
+    #
+    # Login is contained inside index.html.
+    # --------------------------------------------------------
+
+    return render_template(
+        "index.html",
+        authenticated=False,
+        environment=ENVIRONMENT.upper(),
+        session_timeout_minutes=SESSION_TIMEOUT_MINUTES
+    )
+
+
+# ============================================================
+# LOGIN PROCESS
+# ============================================================
+
+@app.route(
+    "/login",
+    methods=["POST"]
+)
+def login():
+
+    email = (
+        request.form.get(
+            "email",
+            ""
+        )
+        .strip()
+        .lower()
+    )
+
+    admin_token = request.form.get(
+        "admin_token",
+        ""
+    )
+
+
+    if not email or not admin_token:
+
+        return render_template(
+            "index.html",
+            authenticated=False,
+            environment=ENVIRONMENT.upper(),
+            login_error="Email and admin token are required."
+        )
+
+
+    token_hash = hash_token(
+        admin_token
+    )
+
+
     connection = None
 
     try:
@@ -368,382 +861,7 @@ def get_dashboard_stats():
 
         with connection.cursor() as cursor:
 
-            # ----------------------------------------------
-            # TOTAL ORDERS
-            # ----------------------------------------------
-
             cursor.execute(
-                """
-                SELECT COUNT(*) AS total_orders
-                FROM orders
-                """
-            )
-
-            total_orders = (
-                cursor.fetchone()
-                ["total_orders"]
-            )
-
-
-            # ----------------------------------------------
-            # CONFIRMED ORDERS
-            # ----------------------------------------------
-
-            cursor.execute(
-                """
-                SELECT COUNT(*) AS confirmed_orders
-                FROM orders
-                WHERE status = 'CONFIRMED'
-                """
-            )
-
-            confirmed_orders = (
-                cursor.fetchone()
-                ["confirmed_orders"]
-            )
-
-
-            # ----------------------------------------------
-            # FAILED ORDERS
-            # ----------------------------------------------
-
-            cursor.execute(
-                """
-                SELECT COUNT(*) AS failed_orders
-                FROM orders
-                WHERE status = 'FAILED'
-                """
-            )
-
-            failed_orders = (
-                cursor.fetchone()
-                ["failed_orders"]
-            )
-
-
-            # ----------------------------------------------
-            # ORDER ITEMS
-            # ----------------------------------------------
-
-            cursor.execute(
-                """
-                SELECT COUNT(*) AS order_items
-                FROM order_items
-                """
-            )
-
-            order_items = (
-                cursor.fetchone()
-                ["order_items"]
-            )
-
-
-            # ----------------------------------------------
-            # ACTIVE PRODUCTS
-            # ----------------------------------------------
-
-            cursor.execute(
-                """
-                SELECT COUNT(*) AS active_products
-                FROM products
-                WHERE is_deleted = FALSE
-                """
-            )
-
-            active_products = (
-                cursor.fetchone()
-                ["active_products"]
-            )
-
-
-            # ----------------------------------------------
-            # TOTAL REVENUE
-            # ----------------------------------------------
-
-            cursor.execute(
-                """
-                SELECT
-                    COALESCE(
-                        SUM(total_amount),
-                        0
-                    ) AS total_revenue
-                FROM orders
-                WHERE status = 'CONFIRMED'
-                """
-            )
-
-            total_revenue = (
-                cursor.fetchone()
-                ["total_revenue"]
-            )
-
-
-        return {
-
-            "total_orders":
-                total_orders,
-
-            "confirmed_orders":
-                confirmed_orders,
-
-            "failed_orders":
-                failed_orders,
-
-            "order_items":
-                order_items,
-
-            "active_products":
-                active_products,
-
-            "total_revenue":
-                total_revenue
-        }
-
-
-    finally:
-
-        if connection:
-            connection.close()
-
-
-# ============================================================
-# REPORT COUNT
-# ============================================================
-
-def get_reports_generated():
-
-    if not REPORTS_BUCKET:
-        return 0
-
-    try:
-
-        paginator = (
-            s3.get_paginator(
-                "list_objects_v2"
-            )
-        )
-
-        count = 0
-
-        for page in paginator.paginate(
-
-            Bucket=REPORTS_BUCKET,
-
-            Prefix="reports/"
-        ):
-
-            count += len(
-                page.get(
-                    "Contents",
-                    []
-                )
-            )
-
-        return count
-
-
-    except Exception as error:
-
-        app.logger.warning(
-            "Could not get reports generated count: %s",
-            error
-        )
-
-        return 0
-
-
-# ============================================================
-# FIND LATEST REPORT
-# ============================================================
-
-def find_latest_report():
-
-    if not REPORTS_BUCKET:
-        return None
-
-    paginator = (
-        s3.get_paginator(
-            "list_objects_v2"
-        )
-    )
-
-    latest = None
-
-
-    for page in paginator.paginate(
-
-        Bucket=REPORTS_BUCKET,
-
-        Prefix="reports/"
-    ):
-
-        for item in page.get(
-            "Contents",
-            []
-        ):
-
-            key = item.get(
-                "Key",
-                ""
-            )
-
-            if not key.endswith(
-                ".csv"
-            ):
-                continue
-
-
-            if (
-                latest is None
-                or
-                item["LastModified"]
-                >
-                latest["LastModified"]
-            ):
-
-                latest = item
-
-
-    return latest
-
-
-# ============================================================
-# LATEST REPORT INFORMATION
-# ============================================================
-
-def get_latest_report():
-
-    latest = find_latest_report()
-
-    if not latest:
-        return None
-
-    return {
-
-        "key":
-            latest["Key"],
-
-        "last_modified":
-            latest["LastModified"]
-    }
-
-
-# ============================================================
-# DOWNLOAD LATEST REPORT
-# ============================================================
-#
-# There is NO presigned URL here.
-#
-# Therefore there is NO 1-hour URL expiration.
-#
-# Flask retrieves the CSV from S3 and sends it
-# directly to the authenticated administrator.
-# ============================================================
-
-@app.route(
-    "/download-latest-report"
-)
-def download_latest_report():
-
-    if not REPORTS_BUCKET:
-
-        return (
-            "Reports bucket is not configured.",
-            500
-        )
-
-
-    latest = find_latest_report()
-
-
-    if not latest:
-
-        return (
-            "No report is currently available.",
-            404
-        )
-
-
-    try:
-
-        response = s3.get_object(
-
-            Bucket=REPORTS_BUCKET,
-
-            Key=latest["Key"]
-        )
-
-
-        report_bytes = (
-            response["Body"].read()
-        )
-
-
-        filename = (
-            os.path.basename(
-                latest["Key"]
-            )
-            or
-            "cloudmart-report.csv"
-        )
-
-
-        return send_file(
-
-            BytesIO(report_bytes),
-
-            mimetype="text/csv",
-
-            as_attachment=True,
-
-            download_name=filename
-        )
-
-
-    except Exception as error:
-
-        app.logger.exception(
-            "Unable to download latest report: %s",
-            error
-        )
-
-        return (
-            "Unable to download the latest report.",
-            500
-        )
-
-
-# ============================================================
-# ADMIN AUTHENTICATION
-# ============================================================
-
-def get_admin_user(
-    email,
-    provided_token
-):
-
-    connection = None
-
-    try:
-
-        token_hash = hashlib.sha256(
-
-            provided_token.encode(
-                "utf-8"
-            )
-
-        ).hexdigest()
-
-
-        connection = (
-            get_db_connection()
-        )
-
-
-        with connection.cursor() as cursor:
-
-            cursor.execute(
-
                 """
                 SELECT
                     user_id,
@@ -756,348 +874,171 @@ def get_admin_user(
                   AND UPPER(role) = 'ADMIN'
                 LIMIT 1
                 """,
-
                 (
-                    email.strip(),
+                    email,
                     token_hash
                 )
             )
 
+            admin = cursor.fetchone()
 
-            return cursor.fetchone()
+
+        if not admin:
+
+            logger.warning(
+                "Invalid admin login attempt for %s",
+                email
+            )
+
+            return render_template(
+                "index.html",
+                authenticated=False,
+                environment=ENVIRONMENT.upper(),
+                login_error="Invalid administrator credentials."
+            )
+
+
+        # ----------------------------------------------------
+        # CREATE ADMIN SESSION
+        # ----------------------------------------------------
+
+        session.clear()
+
+        session.permanent = True
+
+        session["authenticated"] = True
+
+        session["admin_id"] = admin["user_id"]
+
+        session["admin_name"] = admin["name"]
+
+        session["admin_email"] = admin["email"]
+
+        session["admin_role"] = "ADMIN"
+
+        session["last_activity"] = (
+            datetime.now(
+                timezone.utc
+            ).isoformat()
+        )
+
+
+        logger.info(
+            "Administrator login successful: %s",
+            email
+        )
+
+
+        return redirect(
+            url_for("index")
+        )
+
+
+    except Exception as error:
+
+        logger.exception(
+            "Admin login failed"
+        )
+
+        return render_template(
+            "index.html",
+            authenticated=False,
+            environment=ENVIRONMENT.upper(),
+            login_error="Unable to connect to the CloudMart database."
+        )
 
 
     finally:
 
         if connection:
+
             connection.close()
-
-
-# ============================================================
-# ADMIN SESSION PROTECTION
-# ============================================================
-
-@app.before_request
-def require_admin_login():
-
-    # These endpoints are public.
-    if request.endpoint in {
-
-        "login",
-
-        "health",
-
-        "static"
-
-    }:
-
-        return None
-
-
-    # No authenticated session.
-    if not session.get(
-        "admin_authenticated"
-    ):
-
-        return redirect(
-            url_for("login")
-        )
-
-
-    # --------------------------------------------------------
-    # CHECK INACTIVITY TIMEOUT
-    # --------------------------------------------------------
-
-    now = time.time()
-
-    last_activity = session.get(
-        "last_activity",
-        now
-    )
-
-
-    if (
-        now - last_activity
-        >
-        SESSION_TIMEOUT_SECONDS
-    ):
-
-        session.clear()
-
-        return redirect(
-            url_for(
-                "login",
-                expired=1
-            )
-        )
-
-
-    # --------------------------------------------------------
-    # REFRESH INACTIVITY WINDOW
-    # --------------------------------------------------------
-
-    session["last_activity"] = now
-
-    session.permanent = True
-
-    return None
-
-
-# ============================================================
-# LOGIN
-# ============================================================
-
-@app.route(
-    "/login",
-    methods=["GET", "POST"]
-)
-def login():
-
-    if session.get(
-        "admin_authenticated"
-    ):
-
-        return redirect(
-            url_for("dashboard")
-        )
-
-
-    error = None
-
-    expired = (
-        request.args.get(
-            "expired"
-        )
-        ==
-        "1"
-    )
-
-
-    if request.method == "POST":
-
-        email = request.form.get(
-            "email",
-            ""
-        ).strip()
-
-
-        admin_token = request.form.get(
-            "admin_token",
-            ""
-        )
-
-
-        if (
-            not email
-            or
-            not admin_token
-        ):
-
-            error = (
-                "Please enter the "
-                "admin email and token."
-            )
-
-
-        else:
-
-            try:
-
-                admin = get_admin_user(
-
-                    email,
-
-                    admin_token
-                )
-
-
-                if admin:
-
-                    session.clear()
-
-                    session.permanent = True
-
-                    session[
-                        "admin_authenticated"
-                    ] = True
-
-                    session[
-                        "admin_user_id"
-                    ] = int(
-                        admin["user_id"]
-                    )
-
-                    session[
-                        "admin_name"
-                    ] = admin["name"]
-
-                    session[
-                        "admin_email"
-                    ] = admin["email"]
-
-                    session[
-                        "admin_role"
-                    ] = admin["role"]
-
-                    session[
-                        "last_activity"
-                    ] = time.time()
-
-
-                    return redirect(
-                        url_for(
-                            "dashboard"
-                        )
-                    )
-
-
-                error = (
-                    "Invalid admin credentials."
-                )
-
-
-            except Exception:
-
-                app.logger.exception(
-                    "Admin login failed"
-                )
-
-                error = (
-                    "Unable to authenticate. "
-                    "Please try again."
-                )
-
-
-    return render_template(
-
-        "index.html",
-
-        authenticated=False,
-
-        environment=ENVIRONMENT,
-
-        error=error,
-
-        expired=expired,
-
-        session_timeout_minutes=(
-            SESSION_TIMEOUT_MINUTES
-        )
-    )
 
 
 # ============================================================
 # LOGOUT
 # ============================================================
 
-@app.route("/logout")
+@app.route(
+    "/logout",
+    methods=["GET"]
+)
 def logout():
 
-    expired = (
-        request.args.get(
-            "expired"
-        )
-        ==
-        "1"
+    admin_email = session.get(
+        "admin_email"
     )
-
 
     session.clear()
 
-
-    if expired:
-
-        return redirect(
-            url_for(
-                "login",
-                expired=1
-            )
-        )
-
+    logger.info(
+        "Administrator logged out: %s",
+        admin_email
+    )
 
     return redirect(
-        url_for("login")
+        url_for("index")
     )
 
 
 # ============================================================
-# DASHBOARD
+# REPORT DOWNLOAD
 # ============================================================
 
-@app.route("/")
-def dashboard():
+@app.route(
+    "/reports/<path:report_key>",
+    methods=["GET"]
+)
+@login_required
+def download_report(report_key):
+
+    """
+    Download a report directly through Flask.
+
+    This does NOT create a presigned URL, so there is no
+    one-hour URL expiration.
+    """
+
+    if not report_key.startswith(
+        "reports/"
+    ):
+
+        return "Invalid report path.", 400
+
 
     try:
 
-        products = get_products()
-
-        orders = get_recent_orders()
-
-        order_summaries = (
-            get_recent_order_summaries()
+        response = s3.get_object(
+            Bucket=REPORTS_BUCKET,
+            Key=report_key
         )
 
-        stats = get_dashboard_stats()
-
-        reports_generated = (
-            get_reports_generated()
-        )
-
-        latest_report = (
-            get_latest_report()
+        filename = os.path.basename(
+            report_key
         )
 
 
-        return render_template(
-
-            "index.html",
-
-            authenticated=True,
-
-            products=products,
-
-            orders=orders,
-
-            order_summaries=(
-                order_summaries
+        return send_file(
+            response["Body"],
+            mimetype=response.get(
+                "ContentType",
+                "text/csv"
             ),
-
-            stats=stats,
-
-            environment=ENVIRONMENT,
-
-            reports_generated=(
-                reports_generated
-            ),
-
-            latest_report=(
-                latest_report
-            ),
-
-            generated_at=datetime.now(),
-
-            session_timeout_minutes=(
-                SESSION_TIMEOUT_MINUTES
-            )
+            as_attachment=True,
+            download_name=filename
         )
 
 
     except Exception as error:
 
-        app.logger.exception(
-            "Dashboard error"
+        logger.exception(
+            "Report download failed: %s",
+            report_key
         )
 
-
         return (
-
-            "<h1>CloudMart Dashboard</h1>"
-
-            "<h2>Dashboard Error</h2>"
-
-            f"<pre>{error}</pre>",
-
-            500
+            "Unable to download the requested report.",
+            404
         )
 
 
@@ -1105,28 +1046,76 @@ def dashboard():
 # HEALTH CHECK
 # ============================================================
 
-@app.route("/health")
+@app.route(
+    "/health",
+    methods=["GET"]
+)
 def health():
 
     return {
-
-        "status":
-            "healthy",
-
-        "service":
-            "cloudmart-dashboard"
-    }
+        "status": "healthy",
+        "application": "CloudMart Dashboard",
+        "environment": ENVIRONMENT
+    }, 200
 
 
 # ============================================================
-# LOCAL DEVELOPMENT
+# ERROR HANDLERS
+# ============================================================
+
+@app.errorhandler(404)
+def page_not_found(error):
+
+    if is_authenticated():
+
+        return render_template(
+            "index.html",
+            authenticated=True,
+            admin_name=session.get(
+                "admin_name",
+                "Administrator"
+            ),
+            admin_role="ADMIN",
+            stats=get_dashboard_stats(),
+            products=get_products(),
+            users=get_users(),
+            inventory=get_inventory(),
+            order_items=get_order_items(),
+            orders=get_orders(),
+            reports=get_reports(),
+            environment=ENVIRONMENT.upper(),
+            session_timeout_minutes=SESSION_TIMEOUT_MINUTES
+        ), 404
+
+
+    return render_template(
+        "index.html",
+        authenticated=False,
+        environment=ENVIRONMENT.upper()
+    ), 404
+
+
+@app.errorhandler(500)
+def internal_server_error(error):
+
+    logger.exception(
+        "Internal server error"
+    )
+
+    return (
+        "CloudMart Dashboard internal server error.",
+        500
+    )
+
+
+# ============================================================
+# APPLICATION START
 # ============================================================
 
 if __name__ == "__main__":
 
     app.run(
-
-        host="127.0.0.1",
-
-        port=5000
+        host="0.0.0.0",
+        port=5000,
+        debug=False
     )
