@@ -19,6 +19,10 @@ env:
   # Existing Reports bucket
   REPORTS_BUCKET: cloudmart-dev-reports-430155298316
 
+  # Dashboard files stored in the existing Reports bucket
+  DASHBOARD_S3_BUCKET: cloudmart-dev-reports-430155298316
+  DASHBOARD_S3_PREFIX: cloudmart-dashboard
+
   # Reporting Lambda source
   REPORT_LAMBDA_SOURCE: lambda/report/lambda_function.py
 
@@ -56,6 +60,34 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+
+            # =====================================================
+      # UPLOAD DASHBOARD FILES
+      # =====================================================
+
+      - name: Upload Dashboard Files
+        run: |
+
+          echo "Uploading CloudMart dashboard files..."
+
+          test -f dashboard/app.py
+          test -f dashboard/index.html
+          test -f dashboard/login.html
+
+          aws s3 cp \
+            dashboard/app.py \
+            "s3://${DASHBOARD_S3_BUCKET}/${DASHBOARD_S3_PREFIX}/app.py"
+
+          aws s3 cp \
+            dashboard/index.html \
+            "s3://${DASHBOARD_S3_BUCKET}/${DASHBOARD_S3_PREFIX}/index.html"
+
+          aws s3 cp \
+            dashboard/login.html \
+            "s3://${DASHBOARD_S3_BUCKET}/${DASHBOARD_S3_PREFIX}/login.html"
+
+          echo "Dashboard files uploaded successfully."
 
 
       # =====================================================
@@ -252,6 +284,8 @@ jobs:
               ParameterKey=LambdaS3Bucket,ParameterValue="$LAMBDA_S3_BUCKET" \
               ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
               ParameterKey=ReportsBucketName,ParameterValue="$REPORTS_BUCKET" \
+              ParameterKey=DashboardS3Bucket,ParameterValue="$DASHBOARD_S3_BUCKET" \
+              ParameterKey=DashboardS3Prefix,ParameterValue="$DASHBOARD_S3_PREFIX" \
               ParameterKey=DbHostParameterName,ParameterValue="$DB_HOST_PARAMETER" \
               ParameterKey=DbPortParameterName,ParameterValue="$DB_PORT_PARAMETER" \
               ParameterKey=DbNameParameterName,ParameterValue="$DB_NAME_PARAMETER" \
@@ -284,6 +318,8 @@ jobs:
               ParameterKey=LambdaS3Bucket,ParameterValue="$LAMBDA_S3_BUCKET" \
               ParameterKey=LambdaS3Key,ParameterValue="$LAMBDA_S3_KEY" \
               ParameterKey=ReportsBucketName,ParameterValue="$REPORTS_BUCKET" \
+              ParameterKey=DashboardS3Bucket,ParameterValue="$DASHBOARD_S3_BUCKET" \
+              ParameterKey=DashboardS3Prefix,ParameterValue="$DASHBOARD_S3_PREFIX" \
               ParameterKey=DbHostParameterName,ParameterValue="$DB_HOST_PARAMETER" \
               ParameterKey=DbPortParameterName,ParameterValue="$DB_PORT_PARAMETER" \
               ParameterKey=DbNameParameterName,ParameterValue="$DB_NAME_PARAMETER" \
