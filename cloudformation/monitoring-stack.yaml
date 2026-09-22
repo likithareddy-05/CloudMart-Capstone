@@ -213,13 +213,13 @@ Resources:
       AlarmActions:
         - !Ref MonitoringSNSTopic
 
-    Tags:
+      Tags:
 
-      - Key: Project
-        Value: CloudMart
+        - Key: Project
+          Value: CloudMart
 
-      - Key: Environment
-        Value: !Ref Environment
+        - Key: Environment
+          Value: !Ref Environment
 
 
   # =======================================================
