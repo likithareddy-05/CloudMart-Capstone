@@ -310,6 +310,46 @@ def publish_event(
         raise error
 
 
+
+# =========================================================
+# PUBLISH CUSTOM CLOUDWATCH METRIC
+# =========================================================
+
+def publish_metric(metric_name, value=1):
+    """
+    Publish a custom CloudWatch metric to the CloudMart namespace.
+
+    Metric publication is best-effort and must not break a successful
+    database transaction or API response if CloudWatch is temporarily
+    unavailable.
+    """
+
+    try:
+        cloudwatch.put_metric_data(
+            Namespace="CloudMart",
+            MetricData=[
+                {
+                    "MetricName": metric_name,
+                    "Value": value,
+                    "Unit": "Count"
+                }
+            ]
+        )
+
+        print(json.dumps({
+            "event": "cloudwatch_metric_published",
+            "metric_name": metric_name,
+            "value": value
+        }))
+
+    except Exception as metric_error:
+        log_error(
+            "cloudwatch_metric_publish_failed",
+            metric_error,
+            metric_name=metric_name,
+            metric_value=value
+        )
+
 # =========================================================
 # VALIDATE CUSTOMER
 # =========================================================
@@ -863,6 +903,14 @@ def create_order(
 
                 connection.commit()
 
+                # -----------------------------------------
+                # PUBLISH ORDERS FAILED METRIC
+                # -----------------------------------------
+                # The failed order has been committed to RDS,
+                # so publish the metric only after the order is
+                # successfully persisted.
+                publish_metric("OrdersFailed", 1)
+
 
                 print(json.dumps({
                     "event": "order_failed",
@@ -1126,6 +1174,13 @@ def create_order(
             # =============================================
 
             connection.commit()
+
+        # =================================================
+        # PUBLISH ORDERS PLACED METRIC
+        # =================================================
+        # Publish only after the complete order transaction
+        # has been committed successfully.
+        publish_metric("OrdersPlaced", 1)
 
 
         # =================================================

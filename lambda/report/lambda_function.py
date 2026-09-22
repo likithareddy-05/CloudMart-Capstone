@@ -1,8 +1,8 @@
-import csv
-import io
+import csv #use this to create the CSV report.
+import io  #use io.StringIO() to create the CSV in memory,you don't first create a physical CSV file on the Lambda server.
 import json
-import os
-import traceback
+import os #to retrieve environment variables.
+import traceback #used when an error happens.
 from datetime import datetime, timezone
 
 import boto3
@@ -22,7 +22,7 @@ DB_NAME_PARAMETER = os.environ["DB_NAME_PARAMETER"]
 DB_USERNAME_PARAMETER = os.environ["DB_USERNAME_PARAMETER"]
 DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
 
-
+#custom logging function(logs)
 def log_event(event_name, **details):
     log_data = {
         "event": event_name,
@@ -55,7 +55,7 @@ def log_error(event_name, error, **details):
     print(
         json.dumps(
             {
-                "event": f"{event_name}_traceback",
+                "event": f"{event_name}_traceback", #where in the Python code the error occurred.
                 "traceback": traceback.format_exc()
             },
             default=str
@@ -143,7 +143,7 @@ def get_db_connection():
             user=db_username,
             password=db_password,
             database=db_name,
-            cursorclass=pymysql.cursors.DictCursor,
+            cursorclass=pymysql.cursors.DictCursor, #query results are returned as dictionaries
             connect_timeout=10
         )
     except Exception as error:
@@ -382,16 +382,7 @@ def generate_report():
             "Created At"
         ])
 
-        orders_placed = 0
-        orders_failed = 0
-
         for order in orders:
-
-            if order["status"] == "CONFIRMED":
-                orders_placed += 1
-
-            if order["status"] == "FAILED":
-                orders_failed += 1
 
             writer.writerow([
                 order["order_id"],
@@ -464,30 +455,8 @@ def generate_report():
 
 
     # =====================================================
-    # PUBLISH EXISTING METRICS
+    # PUBLISH LOW STOCK EVENTS METRIC
     # =====================================================
-
-    log_event(
-        "orders_placed_metric_publish_started",
-        metric_name="OrdersPlaced",
-        value=orders_placed
-    )
-
-    publish_metric(
-        "OrdersPlaced",
-        orders_placed
-    )
-
-    log_event(
-        "orders_failed_metric_publish_started",
-        metric_name="OrdersFailed",
-        value=orders_failed
-    )
-
-    publish_metric(
-        "OrdersFailed",
-        orders_failed
-    )
 
     log_event(
         "low_stock_events_metric_publish_started",
@@ -504,8 +473,6 @@ def generate_report():
         "all_cloudwatch_metrics_published",
         metrics=[
             "ReportsGenerated",
-            "OrdersPlaced",
-            "OrdersFailed",
             "LowStockEvents"
         ],
         status="success"
@@ -514,8 +481,6 @@ def generate_report():
     return {
         "bucket": REPORTS_BUCKET,
         "key": key,
-        "ordersPlaced": orders_placed,
-        "ordersFailed": orders_failed,
         "lowStockEvents": low_stock_count
     }
 

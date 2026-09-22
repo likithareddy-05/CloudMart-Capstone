@@ -167,6 +167,62 @@ Resources:
 
 
   # =======================================================
+  # ORDERS CANCELLED ALARM
+  # =======================================================
+
+  OrdersCancelledAlarm:
+    Type: AWS::CloudWatch::Alarm
+
+    Properties:
+
+      AlarmName:
+        !Sub CloudMart-${Environment}-OrdersCancelled
+
+      AlarmDescription:
+        !Sub >
+          CloudMart ${Environment}: one or more orders
+          were cancelled.
+
+      Namespace:
+        CloudMart
+
+      MetricName:
+        OrdersCancelled
+
+      Statistic:
+        Sum
+
+      Period:
+        300
+
+      EvaluationPeriods:
+        1
+
+      DatapointsToAlarm:
+        1
+
+      Threshold:
+        1
+
+      ComparisonOperator:
+        GreaterThanOrEqualToThreshold
+
+      TreatMissingData:
+        notBreaching
+
+      AlarmActions:
+        - !Ref MonitoringSNSTopic
+
+    Tags:
+
+      - Key: Project
+        Value: CloudMart
+
+      - Key: Environment
+        Value: !Ref Environment
+
+
+  # =======================================================
   # INVENTORY ALERT ALARM
   # =======================================================
 
@@ -882,6 +938,14 @@ Outputs:
 
     Value:
       !GetAtt OrdersFailedAlarm.Arn
+
+
+  OrdersCancelledAlarmArn:
+    Description:
+      Orders cancelled CloudWatch alarm
+
+    Value:
+      !GetAtt OrdersCancelledAlarm.Arn
 
 
   InventoryAlertsAlarmArn:

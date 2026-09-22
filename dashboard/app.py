@@ -1,6 +1,6 @@
 import os
 import hashlib
-import logging
+import logging #Used to generate application logs.
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 
@@ -9,7 +9,7 @@ import pymysql
 from flask import (
     Flask,
     render_template,
-    request,
+    request, 
     redirect,
     url_for,
     session,
@@ -28,7 +28,7 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger("cloudmart-dashboard")
-
+#the application records informational messages and errors.
 
 # ============================================================
 # APPLICATION
@@ -104,10 +104,10 @@ DB_PASSWORD_PARAMETER = os.getenv(
 SESSION_TIMEOUT_MINUTES = 60
 
 SESSION_SECRET_FILE = "/etc/cloudmart-dashboard-secret"
-
+#This is where your Flask secret is expected to be stored on the EC2 machine.
 
 def load_session_secret():
-
+#tries to read the secret from path
     """
     Load the Flask session secret.
 
@@ -154,9 +154,9 @@ app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
 )
 
 app.config["SESSION_COOKIE_HTTPONLY"] = True
-
+#helps reduce cookie theft through client-side scripts.
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-
+#Helps reduce unwanted cross-site cookie transmission.
 
 # ============================================================
 # AWS CLIENTS
@@ -222,7 +222,7 @@ def get_db_connection():
         user=db_username,
         password=db_password,
         database=db_name,
-        cursorclass=pymysql.cursors.DictCursor,
+        cursorclass=pymysql.cursors.DictCursor, #query results come back like dictionaries
         connect_timeout=10,
         read_timeout=15,
         write_timeout=15,
@@ -259,7 +259,7 @@ def login_required(function):
         if not is_authenticated():
 
             return redirect(
-                url_for("index")
+                url_for("index") #protected routes require login
             )
 
         return function(*args, **kwargs)
@@ -681,10 +681,10 @@ def get_reports():
                 continue
 
             reports.append(
-                {
+                { #For every CSV report, it stores
                     "key": key,
                     "name": key.split("/")[-1],
-                    "size": item.get("Size", 0),
+                    "size": item.get("Size", 0), #sorts reports by modification time, newest first
                     "last_modified": item.get(
                         "LastModified"
                     )
@@ -712,7 +712,7 @@ def get_reports():
 # ============================================================
 # LOGIN
 # ============================================================
-
+#main route
 @app.route(
     "/",
     methods=["GET"]
@@ -720,7 +720,7 @@ def get_reports():
 def index():
 
     if is_authenticated():
-
+#If authenticated, it loads
         try:
 
             stats = get_dashboard_stats()
@@ -738,7 +738,7 @@ def index():
             reports = get_reports()
 
 
-            return render_template(
+            return render_template( #sends all of them to
                 "index.html",
                 authenticated=True,
                 admin_name=session.get(
@@ -903,7 +903,7 @@ def login():
         # ----------------------------------------------------
 
         session.clear()
-
+#After successful login ,Then you store
         session.permanent = True
 
         session["authenticated"] = True
@@ -989,14 +989,13 @@ def logout():
     "/reports/<path:report_key>",
     methods=["GET"]
 )
-@login_required
+@login_required #Only an authenticated administrator can access the report download endpoint
 def download_report(report_key):
 
     """
     Download a report directly through Flask.
 
-    This does NOT create a presigned URL, so there is no
-    one-hour URL expiration.
+
     """
 
     if not report_key.startswith(
@@ -1045,7 +1044,7 @@ def download_report(report_key):
 # ============================================================
 # HEALTH CHECK
 # ============================================================
-
+#used to check whether the Flask application is running
 @app.route(
     "/health",
     methods=["GET"]
@@ -1062,7 +1061,7 @@ def health():
 # ============================================================
 # ERROR HANDLERS
 # ============================================================
-
+#If a page doesn't exist, your application provides the dashboard/login page appropriately.
 @app.errorhandler(404)
 def page_not_found(error):
 
@@ -1097,7 +1096,7 @@ def page_not_found(error):
 
 @app.errorhandler(500)
 def internal_server_error(error):
-
+#If an internal server error occurs, it logs the problem and returns:
     logger.exception(
         "Internal server error"
     )
@@ -1113,9 +1112,9 @@ def internal_server_error(error):
 # ============================================================
 
 if __name__ == "__main__":
-
+#0.0.0.0 means Flask listens on all network interfaces
     app.run(
         host="0.0.0.0",
-        port=5000,
+        port=5000, #application port
         debug=False
     )

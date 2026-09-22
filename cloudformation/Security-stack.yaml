@@ -221,6 +221,13 @@ Resources:
                 Resource: '*'
 
 
+              - Sid: PublishCustomMetrics
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                Resource: '*'
+
+
   # =======================================================
   # 3. INVENTORY ALERT LAMBDA ROLE
   # =======================================================
@@ -309,6 +316,13 @@ Resources:
                 Action:
                   - sns:Publish
 
+                Resource: '*'
+
+
+              - Sid: PublishCustomMetrics
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
                 Resource: '*'
 
 
