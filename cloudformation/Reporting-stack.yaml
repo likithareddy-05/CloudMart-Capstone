@@ -444,7 +444,15 @@ Resources:
               python3-pip \
               nginx \
               openssl \
-              curl
+              curl \
+              aws-cfn-bootstrap \
+              awscli-2
+
+            echo "Required system packages installed."
+
+            # Amazon Linux 2023 normally ships with AWS CLI v2.
+            # Keep this check so bootstrap fails clearly if it is unavailable.
+            command -v aws
 
 
             # =================================================
@@ -477,15 +485,41 @@ Resources:
             echo "Downloading CloudMart dashboard source files..."
 
 
-            aws s3 cp \
+            # Wait briefly for the EC2 instance to obtain working network access.
+            for attempt in $(seq 1 30); do
+              if curl --connect-timeout 3 --max-time 5 -fsS https://s3.${AWS::Region}.amazonaws.com/ >/dev/null 2>&1; then
+                break
+              fi
+
+              echo "Waiting for outbound network access... attempt ${attempt}/30"
+              sleep 5
+            done
+
+            # Download the dashboard files with retries.
+            download_from_s3() {
+              local s3_uri="$1"
+              local destination="$2"
+
+              for attempt in $(seq 1 10); do
+                if aws s3 cp "$s3_uri" "$destination"; then
+                  return 0
+                fi
+
+                echo "S3 download failed (attempt ${attempt}/10): ${s3_uri}"
+                sleep 5
+              done
+
+              echo "ERROR: Unable to download ${s3_uri}"
+              return 1
+            }
+
+            download_from_s3 \
               "s3://${DashboardS3Bucket}/${DashboardS3Prefix}/app.py" \
               "$DASHBOARD_DIR/app.py"
 
-
-            aws s3 cp \
+            download_from_s3 \
               "s3://${DashboardS3Bucket}/${DashboardS3Prefix}/index.html" \
               "$DASHBOARD_DIR/index.html"
-
 
             echo "Dashboard source files downloaded."
 
@@ -511,16 +545,17 @@ Resources:
 
             echo "Installing Python dependencies..."
 
+            VENV_DIR="$DASHBOARD_DIR/venv"
 
-            python3 -m pip install --upgrade pip
+            python3 -m venv "$VENV_DIR"
 
+            "$VENV_DIR/bin/python" -m pip install --upgrade pip
 
-            python3 -m pip install \
+            "$VENV_DIR/bin/pip" install \
               Flask \
               boto3 \
               PyMySQL \
               gunicorn
-
 
             echo "Python dependencies installed."
 
@@ -532,7 +567,7 @@ Resources:
             echo "Validating app.py..."
 
 
-            python3 -m py_compile \
+            "$VENV_DIR/bin/python" -m py_compile \
               "$DASHBOARD_DIR/app.py"
 
 
@@ -581,7 +616,7 @@ Resources:
             Environment="SESSION_TIMEOUT_MINUTES=60"
 
 
-            ExecStart=/usr/local/bin/gunicorn \
+            ExecStart=$DASHBOARD_DIR/venv/bin/gunicorn \
               --workers 2 \
               --bind 127.0.0.1:5000 \
               --access-logfile - \
@@ -660,9 +695,14 @@ Resources:
 
 
             systemctl enable cloudmart-dashboard
-
-
             systemctl restart cloudmart-dashboard
+
+            if ! systemctl is-active --quiet cloudmart-dashboard; then
+              echo "ERROR: CloudMart dashboard service failed to start."
+              systemctl status cloudmart-dashboard --no-pager || true
+              journalctl -u cloudmart-dashboard --no-pager -n 100 || true
+              exit 1
+            fi
 
 
             # =================================================
@@ -679,14 +719,22 @@ Resources:
             echo "Checking Flask dashboard health..."
 
 
-            curl \
-              --fail \
-              --silent \
-              --show-error \
-              http://127.0.0.1:5000/health
+            for attempt in $(seq 1 12); do
+              if curl --fail --silent --show-error http://127.0.0.1:5000/health; then
+                echo
+                break
+              fi
 
+              echo "Waiting for Flask/Gunicorn health endpoint... attempt ${attempt}/12"
+              sleep 5
 
-            echo
+              if [ "$attempt" -eq 12 ]; then
+                echo "ERROR: Flask dashboard did not become healthy."
+                systemctl status cloudmart-dashboard --no-pager || true
+                journalctl -u cloudmart-dashboard --no-pager -n 100 || true
+                exit 1
+              fi
+            done
 
 
             # =================================================
@@ -697,9 +745,32 @@ Resources:
 
 
             systemctl enable nginx
-
-
             systemctl restart nginx
+
+            if ! systemctl is-active --quiet nginx; then
+              echo "ERROR: Nginx failed to start."
+              systemctl status nginx --no-pager || true
+              journalctl -u nginx --no-pager -n 100 || true
+              exit 1
+            fi
+
+            # Verify the public-facing reverse proxy.
+            for attempt in $(seq 1 12); do
+              if curl --fail --silent --show-error http://127.0.0.1/health; then
+                echo
+                break
+              fi
+
+              echo "Waiting for Nginx reverse proxy... attempt ${attempt}/12"
+              sleep 5
+
+              if [ "$attempt" -eq 12 ]; then
+                echo "ERROR: Nginx is running but dashboard is not reachable through port 80."
+                nginx -t || true
+                systemctl status nginx --no-pager || true
+                exit 1
+              fi
+            done
 
 
             # =================================================
