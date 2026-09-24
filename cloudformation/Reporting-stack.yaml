@@ -381,9 +381,7 @@ Resources:
         Fn::Base64:
 
           !Sub |
-
             #!/bin/bash
-
             set -euo pipefail
 
 
