@@ -491,7 +491,7 @@ Resources:
                 break
               fi
 
-              echo "Waiting for outbound network access... attempt ${attempt}/30"
+              echo "Waiting for outbound network access... attempt $attempt/30"
               sleep 5
             done
 
@@ -505,11 +505,11 @@ Resources:
                   return 0
                 fi
 
-                echo "S3 download failed (attempt ${attempt}/10): ${s3_uri}"
+                echo "S3 download failed (attempt $attempt/10): $s3_uri"
                 sleep 5
               done
 
-              echo "ERROR: Unable to download ${s3_uri}"
+              echo "ERROR: Unable to download $s3_uri"
               return 1
             }
 
@@ -725,7 +725,7 @@ Resources:
                 break
               fi
 
-              echo "Waiting for Flask/Gunicorn health endpoint... attempt ${attempt}/12"
+              echo "Waiting for Flask/Gunicorn health endpoint... attempt $attempt/12"
               sleep 5
 
               if [ "$attempt" -eq 12 ]; then
@@ -761,7 +761,7 @@ Resources:
                 break
               fi
 
-              echo "Waiting for Nginx reverse proxy... attempt ${attempt}/12"
+              echo "Waiting for Nginx reverse proxy... attempt $attempt/12"
               sleep 5
 
               if [ "$attempt" -eq 12 ]; then
