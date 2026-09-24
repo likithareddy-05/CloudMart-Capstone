@@ -442,7 +442,6 @@ Resources:
               python3-pip \
               nginx \
               openssl \
-              curl \
               aws-cfn-bootstrap \
               awscli-2
 
