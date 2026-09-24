@@ -4,12 +4,8 @@ Description: >
   CloudMart Reporting Stack.
   Creates the Report Generator Lambda, daily EventBridge schedule,
   and the Flask dashboard EC2 instance.
-  Dashboard source files are downloaded from S3 automatically
-  during EC2 bootstrap.
+  Dashboard source files are read from S3 at EC2 bootstrap time.
 
-# ==========================================================
-# PARAMETERS
-# ==========================================================
 
 Parameters:
 
@@ -94,10 +90,6 @@ Parameters:
     Description: SSM SecureString parameter containing the database password
 
 
-# ==========================================================
-# RESOURCES
-# ==========================================================
-
 Resources:
 
 
@@ -146,9 +138,11 @@ Resources:
 
       MemorySize: 256
 
+
       Role:
         Fn::ImportValue:
           !Sub CloudMart-${Environment}-ReportGeneratorLambdaRoleArn
+
 
       Code:
 
@@ -224,6 +218,7 @@ Resources:
 
       State: ENABLED
 
+
       Targets:
 
         - Arn:
@@ -278,6 +273,7 @@ Resources:
 
       PolicyName:
         !Sub CloudMart-${Environment}-ReportingEventBridgeLogsPolicy
+
 
       PolicyDocument:
 
@@ -337,14 +333,6 @@ Resources:
   DashboardEC2:
     Type: AWS::EC2::Instance
 
-    CreationPolicy:
-
-      ResourceSignal:
-
-        Count: 1
-
-        Timeout: PT15M
-
     Properties:
 
       ImageId:
@@ -353,13 +341,16 @@ Resources:
       InstanceType:
         !Ref InstanceType
 
+
       IamInstanceProfile:
         Fn::ImportValue:
           !Sub CloudMart-${Environment}-DashboardInstanceProfileName
 
+
       SubnetId:
         Fn::ImportValue:
           !Sub CloudMart-${Environment}-PublicSubnetId
+
 
       SecurityGroupIds:
 
@@ -393,52 +384,19 @@ Resources:
 
             #!/bin/bash
 
-            set -Eeuo pipefail
+            set -euo pipefail
 
 
             # =================================================
             # LOGGING
             # =================================================
 
-            LOG_FILE="/var/log/cloudmart-dashboard-userdata.log"
-
-            exec > >(tee -a "$LOG_FILE" | logger -t cloudmart-dashboard-userdata -s 2>/dev/console) 2>&1
+            exec > >(tee /var/log/cloudmart-dashboard-userdata.log | logger -t cloudmart-dashboard-userdata -s 2>/dev/console) 2>&1
 
 
             echo "=================================================="
-            echo "CloudMart Dashboard Bootstrap Started"
+            echo "Starting CloudMart Dashboard Bootstrap"
             echo "=================================================="
-
-
-            # =================================================
-            # CLOUDFORMATION SIGNAL FUNCTION
-            # =================================================
-
-            SIGNAL_SENT=false
-
-            send_signal() {
-
-                EXIT_CODE=$?
-
-                if [ "$SIGNAL_SENT" = "false" ]; then
-
-                    echo "Sending CloudFormation signal. Exit code: $EXIT_CODE"
-
-                    /opt/aws/bin/cfn-signal \
-                      --exit-code "$EXIT_CODE" \
-                      --stack "${AWS::StackName}" \
-                      --resource DashboardEC2 \
-                      --region "${AWS::Region}" || true
-
-                    SIGNAL_SENT=true
-
-                fi
-
-                exit "$EXIT_CODE"
-
-            }
-
-            trap send_signal EXIT
 
 
             # =================================================
@@ -464,73 +422,6 @@ Resources:
             export SESSION_TIMEOUT_MINUTES='60'
 
 
-            echo "Environment: $ENVIRONMENT"
-
-            echo "AWS Region: $AWS_REGION"
-
-
-            # =================================================
-            # WAIT FOR NETWORK
-            # =================================================
-
-            echo "Waiting for network connectivity..."
-
-            for i in {1..30}; do
-
-                if curl -fsS --connect-timeout 5 https://aws.amazon.com >/dev/null 2>&1; then
-
-                    echo "Network connectivity available."
-
-                    break
-
-                fi
-
-                echo "Network not ready. Attempt $i/30"
-
-                sleep 5
-
-            done
-
-
-            # =================================================
-            # UPDATE SYSTEM PACKAGES
-            # =================================================
-
-            echo "Updating system packages..."
-
-            dnf update -y
-
-
-            # =================================================
-            # INSTALL REQUIRED SYSTEM PACKAGES
-            # =================================================
-
-            echo "Installing required system packages..."
-
-            dnf install -y \
-              python3 \
-              python3-pip \
-              python3-devel \
-              nginx \
-              openssl \
-              curl \
-              unzip \
-              awscli-2 \
-              aws-cfn-bootstrap
-
-
-            echo "System packages installed successfully."
-
-
-            # =================================================
-            # VERIFY AWS CLI
-            # =================================================
-
-            echo "Checking AWS CLI..."
-
-            aws --version
-
-
             # =================================================
             # DASHBOARD DIRECTORY
             # =================================================
@@ -542,123 +433,76 @@ Resources:
             cd "$DASHBOARD_DIR"
 
 
-            echo "Dashboard directory: $DASHBOARD_DIR"
+            # =================================================
+            # INSTALL SYSTEM PACKAGES
+            # =================================================
+
+            echo "Installing system packages..."
+
+            dnf install -y \
+              python3 \
+              python3-pip \
+              nginx \
+              openssl \
+              curl
 
 
             # =================================================
             # CREATE FLASK SESSION SECRET
             # =================================================
 
-            echo "Creating Flask session secret..."
+            echo "Creating Flask session secret if required..."
+
 
             if [ ! -s /etc/cloudmart-dashboard-secret ]; then
 
-                umask 077
+              umask 077
 
-                openssl rand -hex 32 \
-                  > /etc/cloudmart-dashboard-secret
+              openssl rand -hex 32 \
+                > /etc/cloudmart-dashboard-secret
 
             fi
 
-            chmod 600 /etc/cloudmart-dashboard-secret
 
-            echo "Flask session secret ready."
-
-
-            # =================================================
-            # DOWNLOAD DASHBOARD SOURCE FILES FROM S3
-            # =================================================
-
-            echo "Downloading dashboard source files from S3..."
-
-            APP_S3_PATH="s3://${DashboardS3Bucket}/${DashboardS3Prefix}/app.py"
-
-            INDEX_S3_PATH="s3://${DashboardS3Bucket}/${DashboardS3Prefix}/index.html"
+            chmod 600 /etc/cloudmart-dashboard-secret 
 
 
-            echo "Downloading app.py..."
-
-            for attempt in {1..5}; do
-
-                if aws s3 cp \
-                  "$APP_S3_PATH" \
-                  "$DASHBOARD_DIR/app.py"; then
-
-                    echo "app.py downloaded successfully."
-
-                    break
-
-                fi
-
-                echo "Failed to download app.py. Attempt $attempt/5"
-
-                if [ "$attempt" -eq 5 ]; then
-
-                    echo "ERROR: Could not download app.py."
-
-                    exit 1
-
-                fi
-
-                sleep 10
-
-            done
-
-
-            echo "Downloading index.html..."
-
-            for attempt in {1..5}; do
-
-                if aws s3 cp \
-                  "$INDEX_S3_PATH" \
-                  "$DASHBOARD_DIR/index.html"; then
-
-                    echo "index.html downloaded successfully."
-
-                    break
-
-                fi
-
-                echo "Failed to download index.html. Attempt $attempt/5"
-
-                if [ "$attempt" -eq 5 ]; then
-
-                    echo "ERROR: Could not download index.html."
-
-                    exit 1
-
-                fi
-
-                sleep 10
-
-            done
+            echo "Flask session secret is ready."
 
 
             # =================================================
-            # VERIFY DOWNLOADED FILES
+            # DOWNLOAD DASHBOARD SOURCE FILES
             # =================================================
 
-            echo "Verifying dashboard files..."
+            echo "Downloading CloudMart dashboard source files..."
+
+
+            aws s3 cp \
+              "s3://${DashboardS3Bucket}/${DashboardS3Prefix}/app.py" \
+              "$DASHBOARD_DIR/app.py"
+
+
+            aws s3 cp \
+              "s3://${DashboardS3Bucket}/${DashboardS3Prefix}/index.html" \
+              "$DASHBOARD_DIR/index.html"
+
+
+            echo "Dashboard source files downloaded."
+
+
+            # =================================================
+            # VALIDATE SOURCE FILES
+            # =================================================
+
+            echo "Validating dashboard files..."
+
 
             test -s "$DASHBOARD_DIR/app.py"
 
             test -s "$DASHBOARD_DIR/index.html"
 
 
-            echo "Dashboard files downloaded successfully."
-
-            echo "Files present:"
-
-            ls -lah "$DASHBOARD_DIR"
-
-
-            # =================================================
-            # CREATE PYTHON VIRTUAL ENVIRONMENT
-            # =================================================
-
-            echo "Creating Python virtual environment..."
-
-            python3 -m venv "$DASHBOARD_DIR/venv"
+            echo "Dashboard files validated successfully."
 
 
             # =================================================
@@ -667,18 +511,18 @@ Resources:
 
             echo "Installing Python dependencies..."
 
-            "$DASHBOARD_DIR/venv/bin/python" \
-              -m pip install --upgrade pip
+
+            python3 -m pip install --upgrade pip
 
 
-            "$DASHBOARD_DIR/venv/bin/pip" install \
+            python3 -m pip install \
               Flask \
               boto3 \
               PyMySQL \
               gunicorn
 
 
-            echo "Python dependencies installed successfully."
+            echo "Python dependencies installed."
 
 
             # =================================================
@@ -687,8 +531,8 @@ Resources:
 
             echo "Validating app.py..."
 
-            "$DASHBOARD_DIR/venv/bin/python" \
-              -m py_compile \
+
+            python3 -m py_compile \
               "$DASHBOARD_DIR/app.py"
 
 
@@ -696,7 +540,7 @@ Resources:
 
 
             # =================================================
-            # CREATE SYSTEMD SERVICE FOR GUNICORN
+            # CREATE SYSTEMD SERVICE
             # =================================================
 
             echo "Creating CloudMart dashboard systemd service..."
@@ -705,16 +549,12 @@ Resources:
             cat > /etc/systemd/system/cloudmart-dashboard.service <<SERVICE
 
             [Unit]
-
             Description=CloudMart Flask Dashboard
-
             After=network-online.target
-
             Wants=network-online.target
 
 
             [Service]
-
             Type=simple
 
             User=root
@@ -741,7 +581,7 @@ Resources:
             Environment="SESSION_TIMEOUT_MINUTES=60"
 
 
-            ExecStart=/opt/cloudmart-dashboard/venv/bin/gunicorn \
+            ExecStart=/usr/local/bin/gunicorn \
               --workers 2 \
               --bind 127.0.0.1:5000 \
               --access-logfile - \
@@ -755,13 +595,9 @@ Resources:
 
 
             [Install]
-
             WantedBy=multi-user.target
 
             SERVICE
-
-
-            echo "Systemd service created."
 
 
             # =================================================
@@ -787,6 +623,7 @@ Resources:
 
                     proxy_pass http://127.0.0.1:5000;
 
+
                     proxy_set_header Host $host;
 
                     proxy_set_header X-Real-IP $remote_addr;
@@ -802,48 +639,37 @@ Resources:
             NGINX
 
 
-            echo "Nginx configuration created."
-
-
             # =================================================
-            # VALIDATE NGINX CONFIGURATION
+            # VALIDATE NGINX
             # =================================================
 
             echo "Validating Nginx configuration..."
 
+
             nginx -t
 
 
-            echo "Nginx configuration is valid."
-
-
             # =================================================
-            # ENABLE AND START GUNICORN
+            # START DASHBOARD
             # =================================================
 
-            echo "Starting CloudMart Gunicorn service..."
+            echo "Starting CloudMart dashboard..."
 
 
             systemctl daemon-reload
 
+
             systemctl enable cloudmart-dashboard
+
 
             systemctl restart cloudmart-dashboard
 
 
+            # =================================================
+            # WAIT FOR GUNICORN
+            # =================================================
+
             sleep 5
-
-
-            # =================================================
-            # CHECK GUNICORN
-            # =================================================
-
-            echo "Checking Gunicorn service..."
-
-            systemctl is-active --quiet cloudmart-dashboard
-
-
-            echo "Gunicorn service is running."
 
 
             # =================================================
@@ -852,57 +678,19 @@ Resources:
 
             echo "Checking Flask dashboard health..."
 
-            HEALTH_CHECK_SUCCESS=false
+
+            curl \
+              --fail \
+              --silent \
+              --show-error \
+              http://127.0.0.1:5000/health
 
 
-            for attempt in {1..12}; do
-
-                echo "Health check attempt $attempt/12"
-
-                if curl \
-                  --fail \
-                  --silent \
-                  --show-error \
-                  --connect-timeout 5 \
-                  http://127.0.0.1:5000/health; then
-
-                    echo
-
-                    echo "Flask health check successful."
-
-                    HEALTH_CHECK_SUCCESS=true
-
-                    break
-
-                fi
-
-                sleep 5
-
-            done
-
-
-            if [ "$HEALTH_CHECK_SUCCESS" = "false" ]; then
-
-                echo "ERROR: Flask health check failed."
-
-                echo "Gunicorn status:"
-
-                systemctl status cloudmart-dashboard --no-pager || true
-
-                echo "Recent Gunicorn logs:"
-
-                journalctl \
-                  -u cloudmart-dashboard \
-                  --no-pager \
-                  -n 50 || true
-
-                exit 1
-
-            fi
+            echo
 
 
             # =================================================
-            # ENABLE AND START NGINX
+            # START NGINX
             # =================================================
 
             echo "Starting Nginx..."
@@ -910,57 +698,8 @@ Resources:
 
             systemctl enable nginx
 
+
             systemctl restart nginx
-
-
-            # =================================================
-            # CHECK NGINX
-            # =================================================
-
-            echo "Checking Nginx service..."
-
-            systemctl is-active --quiet nginx
-
-
-            echo "Nginx service is running."
-
-
-            # =================================================
-            # FINAL HTTP CHECK
-            # =================================================
-
-            echo "Checking dashboard through Nginx..."
-
-            for attempt in {1..12}; do
-
-                if curl \
-                  --fail \
-                  --silent \
-                  --show-error \
-                  --connect-timeout 5 \
-                  http://127.0.0.1/health >/dev/null; then
-
-                    echo "Nginx → Gunicorn → Flask check successful."
-
-                    break
-
-                fi
-
-                echo "Nginx health check attempt $attempt/12 failed."
-
-                if [ "$attempt" -eq 12 ]; then
-
-                    echo "ERROR: Nginx final health check failed."
-
-                    systemctl status nginx --no-pager || true
-
-                    exit 1
-
-                fi
-
-                sleep 5
-
-            done
 
 
             # =================================================
@@ -973,15 +712,7 @@ Resources:
 
             echo "Environment: ${Environment}"
 
-            echo "AWS Region: ${AWS::Region}"
-
             echo "Dashboard directory: $DASHBOARD_DIR"
-
-            echo "Gunicorn: RUNNING"
-
-            echo "Nginx: RUNNING"
-
-            echo "Flask: HEALTHY"
 
             echo "=================================================="
 
@@ -1007,7 +738,8 @@ Resources:
           Value: CloudMart
 
         - Key: Environment
-          Value: !Ref Environment
+          Value:
+            !Ref Environment
 
 
   # ==========================================================
@@ -1026,9 +758,9 @@ Resources:
         !GetAtt DashboardElasticIP.AllocationId
 
 
-# ==========================================================
+# ============================================================
 # OUTPUTS
-# ==========================================================
+# ============================================================
 
 Outputs:
 

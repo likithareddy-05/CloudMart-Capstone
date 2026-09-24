@@ -533,17 +533,7 @@ Resources:
                   !Sub arn:${AWS::Partition}:s3:::${DashboardS3Bucket}/${DashboardS3Prefix}/*
 
 
-              - Sid: SignalCloudFormation
-
-                Effect: Allow
-
-                Action:
-                  - cloudformation:SignalResource
-
-                Resource:
-                  !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/cloudmart-${Environment}-reporting/*
-
-
+              
   # =======================================================
   # 6. EC2 DASHBOARD INSTANCE PROFILE
   # =======================================================
