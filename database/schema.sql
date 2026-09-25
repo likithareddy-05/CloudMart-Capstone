@@ -201,16 +201,6 @@ EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
 
--- =====================================================
--- REMOVE DUPLICATE INVENTORY ROWS
--- =====================================================
-
-DELETE i1
-FROM inventory i1
-JOIN inventory i2
-    ON i1.product_id = i2.product_id
-   AND i1.inventory_id > i2.inventory_id;
-
 
 -- =====================================================
 -- INVENTORY PRODUCT UNIQUE CONSTRAINT
