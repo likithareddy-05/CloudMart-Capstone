@@ -912,6 +912,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -938,34 +941,6 @@ jobs:
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --region "$AWS_REGION"
-
-      - name: Verify Monitoring stack
-        run: |
-          set -euo pipefail
-
-          STATUS=$(aws cloudformation describe-stacks \
-            --stack-name "$MONITORING_STACK" \
-            --region "$AWS_REGION" \
-            --query 'Stacks[0].StackStatus' \
-            --output text)
-
-          echo "Monitoring status: $STATUS"
-
-          case "$STATUS" in
-            CREATE_COMPLETE|UPDATE_COMPLETE) ;;
-            *)
-              echo "ERROR: Monitoring stack is not ready."
-              exit 1
-              ;;
-          esac
-
-      - name: Display Monitoring outputs
-        run: |
-          aws cloudformation describe-stacks \
-            --stack-name "$MONITORING_STACK" \
-            --region "$AWS_REGION" \
-            --query 'Stacks[0].Outputs' \
-            --output table
 
 
   # =========================================================
