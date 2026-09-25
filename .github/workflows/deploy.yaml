@@ -2,21 +2,6 @@ name: Deploy CloudMart - Full Stack
 
 on:
   workflow_dispatch:
-    inputs:
-      order_email:
-        description: 'Email address for order notifications'
-        required: true
-        type: string
-
-      low_stock_email:
-        description: 'Email address for low-stock notifications'
-        required: true
-        type: string
-
-      monitoring_email:
-        description: 'Email address for CloudWatch monitoring alarms'
-        required: true
-        type: string
 
 permissions:
   id-token: write
@@ -126,8 +111,9 @@ jobs:
   # Created before Data because Data needs db/password when
   # creating the RDS master password.
   #
-  # Email values come from workflow_dispatch inputs, NOT GitHub
-  # Secrets. They are stored in SSM by this job.
+  # Notification email values are stored persistently in SSM.
+  # This workflow only verifies the existing values and reuses them;
+  # they are NOT requested as workflow inputs on every deployment.
   #
   # Data stack itself creates:
   #   /cloudmart/dev/db/host
@@ -168,45 +154,29 @@ jobs:
 
           echo "DB password SecureString created/updated."
 
-      - name: Create Order Email parameter
-        env:
-          ORDER_EMAIL: ${{ inputs.order_email }}
+      - name: Verify existing Order Email parameter
         run: |
           set -euo pipefail
 
-          if [ -z "$ORDER_EMAIL" ]; then
-            echo "ERROR: order_email workflow input is empty."
-            exit 1
-          fi
-
-          aws ssm put-parameter \
+          aws ssm get-parameter \
             --name "/cloudmart/$ENVIRONMENT/notifications/order-email" \
-            --type String \
-            --value "$ORDER_EMAIL" \
-            --overwrite \
-            --region "$AWS_REGION"
+            --region "$AWS_REGION" \
+            --query 'Parameter.{Name:Name,Type:Type}' \
+            --output table
 
-          echo "Order email SSM parameter created/updated."
+          echo "Order email parameter already exists. Keeping the stored value."
 
-      - name: Create Low Stock Email parameter
-        env:
-          LOW_STOCK_EMAIL: ${{ inputs.low_stock_email }}
+      - name: Verify existing Low Stock Email parameter
         run: |
           set -euo pipefail
 
-          if [ -z "$LOW_STOCK_EMAIL" ]; then
-            echo "ERROR: low_stock_email workflow input is empty."
-            exit 1
-          fi
-
-          aws ssm put-parameter \
+          aws ssm get-parameter \
             --name "/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
-            --type String \
-            --value "$LOW_STOCK_EMAIL" \
-            --overwrite \
-            --region "$AWS_REGION"
+            --region "$AWS_REGION" \
+            --query 'Parameter.{Name:Name,Type:Type}' \
+            --output table
 
-          echo "Low-stock email SSM parameter created/updated."
+          echo "Low-stock email parameter already exists. Keeping the stored value."
 
       - name: Verify pre-Data SSM parameters
         run: |
@@ -921,16 +891,28 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy Monitoring stack
-        env:
-          MONITORING_EMAIL: ${{ inputs.monitoring_email }}
+      - name: Read existing Monitoring Email parameter
         run: |
           set -euo pipefail
 
-          if [ -z "$MONITORING_EMAIL" ]; then
-            echo "ERROR: monitoring_email workflow input is empty."
+          MONITORING_EMAIL=$(aws ssm get-parameter \
+            --name "/cloudmart/$ENVIRONMENT/monitoring/email" \
+            --region "$AWS_REGION" \
+            --query 'Parameter.Value' \
+            --output text)
+
+          if [ -z "$MONITORING_EMAIL" ] || [ "$MONITORING_EMAIL" = "None" ]; then
+            echo "ERROR: /cloudmart/$ENVIRONMENT/monitoring/email does not exist or is empty."
+            echo "The monitoring email must be configured once in SSM before deployment."
             exit 1
           fi
+
+          echo "Monitoring email parameter found. Reusing the stored value."
+          echo "MONITORING_EMAIL=$MONITORING_EMAIL" >> "$GITHUB_ENV"
+
+      - name: Deploy Monitoring stack
+        run: |
+          set -euo pipefail
 
           aws cloudformation deploy \
             --stack-name "$MONITORING_STACK" \
@@ -948,6 +930,7 @@ jobs:
   # =========================================================
   # No API/dashboard health tests are performed here.
   # This stage checks stack/resource existence and configuration.
+  # Notification emails are persisted in SSM and reused across deployments.
   # =========================================================
   verify:
     name: 11 - Final Verification
