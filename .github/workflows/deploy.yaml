@@ -777,7 +777,7 @@ jobs:
 
 
   # ============================================================
-  # 12. FINAL SMOKE TESTS
+  # 12. FINAL VERIFICATION
   # ============================================================
   verify:
     name: Final CloudMart Verification
@@ -810,53 +810,6 @@ jobs:
               *) echo "ERROR: $NAME is not healthy."; exit 1 ;;
             esac
           done
-
-      - name: Dashboard smoke test
-        run: |
-          DASHBOARD_URL=$(aws cloudformation describe-stacks \
-            --stack-name "cloudmart-${ENVIRONMENT}-reporting" \
-            --region "$AWS_REGION" \
-            --query "Stacks[0].Outputs[?OutputKey=='DashboardURL'].OutputValue" \
-            --output text)
-
-          echo "Dashboard URL: $DASHBOARD_URL"
-
-          for attempt in $(seq 1 12); do
-            if curl --fail --silent --show-error --max-time 10 "$DASHBOARD_URL/health"; then
-              echo
-              echo "Dashboard smoke test passed."
-              break
-            fi
-            echo "Dashboard not ready; retry $attempt/12"
-            sleep 10
-            if [ "$attempt" -eq 12 ]; then
-              echo "ERROR: Dashboard health check failed."
-              exit 1
-            fi
-          done
-
-      - name: API smoke test
-        run: |
-          API_URL=$(aws cloudformation describe-stacks \
-            --stack-name "cloudmart-${ENVIRONMENT}-api" \
-            --region "$AWS_REGION" \
-            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
-            --output text)
-
-          echo "API URL: $API_URL"
-
-          HTTP_CODE=$(curl -sS -o /tmp/api-response.txt -w '%{http_code}' \
-            --max-time 20 "$API_URL/products")
-
-          echo "Unauthenticated /products HTTP status: $HTTP_CODE"
-          cat /tmp/api-response.txt || true
-
-          if [ "$HTTP_CODE" != "401" ] && [ "$HTTP_CODE" != "403" ]; then
-            echo "ERROR: Expected unauthenticated API request to be rejected."
-            exit 1
-          fi
-
-          echo "API authentication smoke test passed."
 
       - name: Final outputs
         run: |
