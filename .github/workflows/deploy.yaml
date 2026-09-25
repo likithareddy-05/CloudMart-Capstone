@@ -2,6 +2,21 @@ name: Deploy CloudMart - Full Stack
 
 on:
   workflow_dispatch:
+    inputs:
+      order_email:
+        description: 'Email address for order notifications'
+        required: true
+        type: string
+
+      low_stock_email:
+        description: 'Email address for low-stock notifications'
+        required: true
+        type: string
+
+      monitoring_email:
+        description: 'Email address for CloudWatch monitoring alarms'
+        required: true
+        type: string
 
 permissions:
   id-token: write
@@ -21,7 +36,6 @@ env:
   MONITORING_STACK: cloudmart-dev-monitoring
 
   DASHBOARD_S3_PREFIX: cloudmart-dashboard
-
   DB_NAME: cloudmart
   DB_USERNAME: cloudmartadmin
 
@@ -49,7 +63,8 @@ jobs:
 
       - name: Validate CloudFormation templates
         run: |
-          set -e
+          set -euo pipefail
+
           for template in \
             cloudformation/Network-stack.yaml \
             cloudformation/Data-stack.yaml \
@@ -63,14 +78,18 @@ jobs:
             echo "========================================"
             echo "Validating $template"
             echo "========================================"
+
             aws cloudformation validate-template \
               --template-body "file://$template" \
               --region "$AWS_REGION" >/dev/null
+
             echo "$template is valid."
           done
 
       - name: Deploy Network stack
         run: |
+          set -euo pipefail
+
           aws cloudformation deploy \
             --stack-name "$NETWORK_STACK" \
             --template-file cloudformation/Network-stack.yaml \
@@ -81,6 +100,8 @@ jobs:
 
       - name: Verify Network stack
         run: |
+          set -euo pipefail
+
           STATUS=$(aws cloudformation describe-stacks \
             --stack-name "$NETWORK_STACK" \
             --region "$AWS_REGION" \
@@ -91,7 +112,10 @@ jobs:
 
           case "$STATUS" in
             CREATE_COMPLETE|UPDATE_COMPLETE) ;;
-            *) echo "Network stack is not ready."; exit 1 ;;
+            *)
+              echo "ERROR: Network stack is not ready."
+              exit 1
+              ;;
           esac
 
 
@@ -99,19 +123,18 @@ jobs:
   # 2. SSM - PRE-DATA PARAMETERS ONLY
   # =========================================================
   #
-  # IMPORTANT:
-  # The Data stack creates these RDS-derived parameters itself:
+  # Created before Data because Data needs db/password when
+  # creating the RDS master password.
+  #
+  # Email values come from workflow_dispatch inputs, NOT GitHub
+  # Secrets. They are stored in SSM by this job.
+  #
+  # Data stack itself creates:
   #   /cloudmart/dev/db/host
   #   /cloudmart/dev/db/port
   #   /cloudmart/dev/db/name
   #   /cloudmart/dev/db/username
   #
-  # Therefore this job creates only parameters that must exist
-  # before Data is deployed.
-  #
-  # The current Authorizer authenticates against token_hash in
-  # the users table, so there are NO user-token/admin-token SSM
-  # parameters in this current implementation.
   # =========================================================
   ssm:
     name: 2 - SSM
@@ -119,44 +142,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Validate required GitHub secrets
+      - name: Create DB password SecureString
         env:
           DB_PASSWORD: ${{ secrets.CLOUDMART_DB_PASSWORD }}
-          ORDER_EMAIL: ${{ secrets.ORDER_EMAIL }}
-          LOW_STOCK_EMAIL: ${{ secrets.LOW_STOCK_EMAIL }}
         run: |
+          set -euo pipefail
+
           if [ -z "$DB_PASSWORD" ]; then
-            echo "ERROR: CLOUDMART_DB_PASSWORD secret is missing."
+            echo "ERROR: CLOUDMART_DB_PASSWORD GitHub Secret is missing."
             exit 1
           fi
 
-          if [ -z "$ORDER_EMAIL" ]; then
-            echo "ERROR: ORDER_EMAIL secret is missing."
-            exit 1
-          fi
-
-          if [ -z "$LOW_STOCK_EMAIL" ]; then
-            echo "ERROR: LOW_STOCK_EMAIL secret is missing."
-            exit 1
-          fi
-
-          echo "Required pre-Data configuration is available."
-
-      - name: Create or update DB password SecureString
-        env:
-          DB_PASSWORD: ${{ secrets.CLOUDMART_DB_PASSWORD }}
-        run: |
           aws ssm put-parameter \
-            --name "/cloudmart/${ENVIRONMENT}/db/password" \
+            --name "/cloudmart/$ENVIRONMENT/db/password" \
             --type SecureString \
             --value "$DB_PASSWORD" \
             --overwrite \
@@ -164,44 +168,57 @@ jobs:
 
           echo "DB password SecureString created/updated."
 
-      - name: Create or update Order email parameter
+      - name: Create Order Email parameter
         env:
-          ORDER_EMAIL: ${{ secrets.ORDER_EMAIL }}
+          ORDER_EMAIL: ${{ inputs.order_email }}
         run: |
+          set -euo pipefail
+
+          if [ -z "$ORDER_EMAIL" ]; then
+            echo "ERROR: order_email workflow input is empty."
+            exit 1
+          fi
+
           aws ssm put-parameter \
-            --name "/cloudmart/${ENVIRONMENT}/notifications/order-email" \
+            --name "/cloudmart/$ENVIRONMENT/notifications/order-email" \
             --type String \
             --value "$ORDER_EMAIL" \
             --overwrite \
             --region "$AWS_REGION"
 
-          echo "Order email parameter created/updated."
+          echo "Order email SSM parameter created/updated."
 
-      - name: Create or update Low Stock email parameter
+      - name: Create Low Stock Email parameter
         env:
-          LOW_STOCK_EMAIL: ${{ secrets.LOW_STOCK_EMAIL }}
+          LOW_STOCK_EMAIL: ${{ inputs.low_stock_email }}
         run: |
+          set -euo pipefail
+
+          if [ -z "$LOW_STOCK_EMAIL" ]; then
+            echo "ERROR: low_stock_email workflow input is empty."
+            exit 1
+          fi
+
           aws ssm put-parameter \
-            --name "/cloudmart/${ENVIRONMENT}/notifications/low-stock-email" \
+            --name "/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
             --type String \
             --value "$LOW_STOCK_EMAIL" \
             --overwrite \
             --region "$AWS_REGION"
 
-          echo "Low-stock email parameter created/updated."
+          echo "Low-stock email SSM parameter created/updated."
 
       - name: Verify pre-Data SSM parameters
         run: |
-          set -e
+          set -euo pipefail
 
-          for parameter in \
-            "/cloudmart/${ENVIRONMENT}/db/password" \
-            "/cloudmart/${ENVIRONMENT}/notifications/order-email" \
-            "/cloudmart/${ENVIRONMENT}/notifications/low-stock-email"
+          for name in \
+            "/cloudmart/$ENVIRONMENT/db/password" \
+            "/cloudmart/$ENVIRONMENT/notifications/order-email" \
+            "/cloudmart/$ENVIRONMENT/notifications/low-stock-email"
           do
-            echo "Checking $parameter"
             aws ssm get-parameter \
-              --name "$parameter" \
+              --name "$name" \
               --region "$AWS_REGION" \
               --query 'Parameter.{Name:Name,Type:Type}' \
               --output table
@@ -226,16 +243,10 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Verify DB password parameter exists
-        run: |
-          aws ssm get-parameter \
-            --name "/cloudmart/${ENVIRONMENT}/db/password" \
-            --region "$AWS_REGION" \
-            --query 'Parameter.{Name:Name,Type:Type}' \
-            --output table
-
       - name: Deploy Data stack
         run: |
+          set -euo pipefail
+
           aws cloudformation deploy \
             --stack-name "$DATA_STACK" \
             --template-file cloudformation/Data-stack.yaml \
@@ -249,6 +260,8 @@ jobs:
 
       - name: Verify Data stack
         run: |
+          set -euo pipefail
+
           STATUS=$(aws cloudformation describe-stacks \
             --stack-name "$DATA_STACK" \
             --region "$AWS_REGION" \
@@ -259,28 +272,30 @@ jobs:
 
           case "$STATUS" in
             CREATE_COMPLETE|UPDATE_COMPLETE) ;;
-            *) echo "Data stack is not ready."; exit 1 ;;
+            *)
+              echo "ERROR: Data stack is not ready."
+              exit 1
+              ;;
           esac
 
-      - name: Verify RDS-derived SSM parameters created by Data
+      - name: Verify RDS-derived SSM parameters
         run: |
-          set -e
+          set -euo pipefail
 
-          for parameter in \
-            "/cloudmart/${ENVIRONMENT}/db/host" \
-            "/cloudmart/${ENVIRONMENT}/db/port" \
-            "/cloudmart/${ENVIRONMENT}/db/name" \
-            "/cloudmart/${ENVIRONMENT}/db/username"
+          for name in \
+            "/cloudmart/$ENVIRONMENT/db/host" \
+            "/cloudmart/$ENVIRONMENT/db/port" \
+            "/cloudmart/$ENVIRONMENT/db/name" \
+            "/cloudmart/$ENVIRONMENT/db/username"
           do
-            echo "Checking $parameter"
             aws ssm get-parameter \
-              --name "$parameter" \
+              --name "$name" \
               --region "$AWS_REGION" \
               --query 'Parameter.{Name:Name,Type:Type}' \
               --output table
           done
 
-      - name: Display Data stack outputs
+      - name: Display Data outputs
         run: |
           aws cloudformation describe-stacks \
             --stack-name "$DATA_STACK" \
@@ -307,8 +322,11 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get Reports bucket from Data stack
+      - name: Get Reports bucket
+        id: buckets
         run: |
+          set -euo pipefail
+
           REPORTS_BUCKET=$(aws cloudformation describe-stacks \
             --stack-name "$DATA_STACK" \
             --region "$AWS_REGION" \
@@ -320,17 +338,18 @@ jobs:
             exit 1
           fi
 
-          echo "REPORTS_BUCKET=$REPORTS_BUCKET" >> "$GITHUB_ENV"
-          echo "Reports bucket found."
+          echo "reports_bucket=$REPORTS_BUCKET" >> "$GITHUB_OUTPUT"
 
       - name: Deploy Security stack
         run: |
+          set -euo pipefail
+
           aws cloudformation deploy \
             --stack-name "$SECURITY_STACK" \
             --template-file cloudformation/Security-stack.yaml \
             --parameter-overrides \
               Environment="$ENVIRONMENT" \
-              DashboardS3Bucket="$REPORTS_BUCKET" \
+              DashboardS3Bucket="${{ steps.buckets.outputs.reports_bucket }}" \
               DashboardS3Prefix="$DASHBOARD_S3_PREFIX" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
@@ -338,6 +357,8 @@ jobs:
 
       - name: Verify Security stack
         run: |
+          set -euo pipefail
+
           STATUS=$(aws cloudformation describe-stacks \
             --stack-name "$SECURITY_STACK" \
             --region "$AWS_REGION" \
@@ -348,15 +369,18 @@ jobs:
 
           case "$STATUS" in
             CREATE_COMPLETE|UPDATE_COMPLETE) ;;
-            *) echo "Security stack is not ready."; exit 1 ;;
+            *)
+              echo "ERROR: Security stack is not ready."
+              exit 1
+              ;;
           esac
 
 
   # =========================================================
   # 5. ARTIFACTS
   # =========================================================
-  # Packages and uploads Lambda code + dashboard files.
-  # This is NOT a CloudFormation stack.
+  # Packages and uploads all six Lambda deployment packages and
+  # the dashboard files before Schema/Auth/API/Reporting need them.
   # =========================================================
   artifacts:
     name: 5 - Artifacts
@@ -373,8 +397,10 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get S3 buckets from Data stack
+      - name: Get artifact buckets
         run: |
+          set -euo pipefail
+
           LAMBDA_BUCKET=$(aws cloudformation describe-stacks \
             --stack-name "$DATA_STACK" \
             --region "$AWS_REGION" \
@@ -388,95 +414,80 @@ jobs:
             --output text)
 
           if [ -z "$LAMBDA_BUCKET" ] || [ "$LAMBDA_BUCKET" = "None" ]; then
-            echo "ERROR: Lambda bucket not found."
+            echo "ERROR: LambdaBucket output not found."
             exit 1
           fi
 
           if [ -z "$REPORTS_BUCKET" ] || [ "$REPORTS_BUCKET" = "None" ]; then
-            echo "ERROR: Reports bucket not found."
+            echo "ERROR: ReportsBucketName output not found."
             exit 1
           fi
 
           echo "LAMBDA_BUCKET=$LAMBDA_BUCKET" >> "$GITHUB_ENV"
           echo "REPORTS_BUCKET=$REPORTS_BUCKET" >> "$GITHUB_ENV"
 
-      - name: Verify source files
+      - name: Prepare packaging tools
         run: |
-          set -e
-          test -s lambda/product/lambda_function.py
-          test -s lambda/inventory-alert/lambda_function.py
-          test -s lambda/order/lambda_function.py
-          test -s lambda/authorizer/lambda_function.py
-          test -s lambda/report/lambda_function.py
-          test -s lambda/schema-runner/lambda_function.py
-          test -s database/schema.sql
-          test -s dashboard/app.py
-          test -s dashboard/index.html
-          echo "All Lambda and dashboard source files are present."
+          python3 --version
+          python3 -m pip install --upgrade pip
 
-      - name: Build Product Lambda package
+      - name: Package Product Lambda
         run: |
-          rm -rf build-product product.zip
-          mkdir build-product
-          python -m pip install PyMySQL --target build-product
-          cp lambda/product/lambda_function.py build-product/
-          cd build-product
-          zip -qr ../product.zip .
-          cd ..
+          set -euo pipefail
+          rm -rf /tmp/product-package product.zip
+          mkdir -p /tmp/product-package
+          python3 -m pip install PyMySQL -t /tmp/product-package --no-compile
+          cp lambda/product/lambda_function.py /tmp/product-package/
+          (cd /tmp/product-package && zip -qr "$GITHUB_WORKSPACE/product.zip" .)
 
-      - name: Build Inventory Alert Lambda package
+      - name: Package Inventory Alert Lambda
         run: |
-          rm -rf build-inventory-alert inventory-alert.zip
-          mkdir build-inventory-alert
-          cp lambda/inventory-alert/lambda_function.py build-inventory-alert/
-          cd build-inventory-alert
-          zip -qr ../inventory-alert.zip .
-          cd ..
+          set -euo pipefail
+          rm -rf /tmp/inventory-alert-package inventory-alert.zip
+          mkdir -p /tmp/inventory-alert-package
+          cp lambda/inventory-alert/lambda_function.py /tmp/inventory-alert-package/
+          (cd /tmp/inventory-alert-package && zip -qr "$GITHUB_WORKSPACE/inventory-alert.zip" .)
 
-      - name: Build Order Lambda package
+      - name: Package Order Lambda
         run: |
-          rm -rf build-order order.zip
-          mkdir build-order
-          python -m pip install PyMySQL --target build-order
-          cp lambda/order/lambda_function.py build-order/
-          cd build-order
-          zip -qr ../order.zip .
-          cd ..
+          set -euo pipefail
+          rm -rf /tmp/order-package order.zip
+          mkdir -p /tmp/order-package
+          python3 -m pip install PyMySQL -t /tmp/order-package --no-compile
+          cp lambda/order/lambda_function.py /tmp/order-package/
+          (cd /tmp/order-package && zip -qr "$GITHUB_WORKSPACE/order.zip" .)
 
-      - name: Build Authorizer Lambda package
+      - name: Package Authorizer Lambda
         run: |
-          rm -rf build-authorizer authorizer.zip
-          mkdir build-authorizer
-          python -m pip install PyMySQL --target build-authorizer
-          cp lambda/authorizer/lambda_function.py build-authorizer/
-          cd build-authorizer
-          zip -qr ../authorizer.zip .
-          cd ..
+          set -euo pipefail
+          rm -rf /tmp/authorizer-package authorizer.zip
+          mkdir -p /tmp/authorizer-package
+          python3 -m pip install PyMySQL -t /tmp/authorizer-package --no-compile
+          cp lambda/authorizer/lambda_function.py /tmp/authorizer-package/
+          (cd /tmp/authorizer-package && zip -qr "$GITHUB_WORKSPACE/authorizer.zip" .)
 
-      - name: Build Report Lambda package
+      - name: Package Report Lambda
         run: |
-          rm -rf build-report report.zip
-          mkdir build-report
-          python -m pip install PyMySQL --target build-report
-          cp lambda/report/lambda_function.py build-report/
-          cd build-report
-          zip -qr ../report.zip .
-          cd ..
+          set -euo pipefail
+          rm -rf /tmp/report-package report.zip
+          mkdir -p /tmp/report-package
+          python3 -m pip install PyMySQL -t /tmp/report-package --no-compile
+          cp lambda/report/lambda_function.py /tmp/report-package/
+          (cd /tmp/report-package && zip -qr "$GITHUB_WORKSPACE/report.zip" .)
 
-      - name: Build Schema Runner Lambda package
+      - name: Package Schema Runner Lambda
         run: |
-          rm -rf build-schema schema-runner.zip
-          mkdir build-schema
-          python -m pip install PyMySQL --target build-schema
-          cp lambda/schema-runner/lambda_function.py build-schema/
-          cp database/schema.sql build-schema/
-          cd build-schema
-          zip -qr ../schema-runner.zip .
-          cd ..
+          set -euo pipefail
+          rm -rf /tmp/schema-package schema-runner.zip
+          mkdir -p /tmp/schema-package
+          python3 -m pip install PyMySQL -t /tmp/schema-package --no-compile
+          cp lambda/schema-runner/lambda_function.py /tmp/schema-package/
+          cp database/schema.sql /tmp/schema-package/
+          (cd /tmp/schema-package && zip -qr "$GITHUB_WORKSPACE/schema-runner.zip" .)
 
-      - name: Upload Lambda packages
+      - name: Upload Lambda artifacts
         run: |
-          set -e
+          set -euo pipefail
 
           aws s3 cp product.zip \
             "s3://${LAMBDA_BUCKET}/product/product-${GITHUB_SHA}.zip" \
@@ -504,6 +515,8 @@ jobs:
 
       - name: Upload dashboard files
         run: |
+          set -euo pipefail
+
           aws s3 cp dashboard/app.py \
             "s3://${REPORTS_BUCKET}/${DASHBOARD_S3_PREFIX}/app.py" \
             --region "$AWS_REGION"
@@ -514,37 +527,22 @@ jobs:
 
       - name: Verify uploaded artifacts
         run: |
-          set -e
+          set -euo pipefail
 
-          aws s3api head-object \
-            --bucket "$LAMBDA_BUCKET" \
-            --key "product/product-${GITHUB_SHA}.zip" \
-            --region "$AWS_REGION"
-
-          aws s3api head-object \
-            --bucket "$LAMBDA_BUCKET" \
-            --key "inventory-alert/inventory-alert-${GITHUB_SHA}.zip" \
-            --region "$AWS_REGION"
-
-          aws s3api head-object \
-            --bucket "$LAMBDA_BUCKET" \
-            --key "order/order-${GITHUB_SHA}.zip" \
-            --region "$AWS_REGION"
-
-          aws s3api head-object \
-            --bucket "$LAMBDA_BUCKET" \
-            --key "authorizer/authorizer-${GITHUB_SHA}.zip" \
-            --region "$AWS_REGION"
-
-          aws s3api head-object \
-            --bucket "$LAMBDA_BUCKET" \
-            --key "report/report-${GITHUB_SHA}.zip" \
-            --region "$AWS_REGION"
-
-          aws s3api head-object \
-            --bucket "$LAMBDA_BUCKET" \
-            --key "schema/schema-runner-${GITHUB_SHA}.zip" \
-            --region "$AWS_REGION"
+          for key in \
+            "product/product-${GITHUB_SHA}.zip" \
+            "inventory-alert/inventory-alert-${GITHUB_SHA}.zip" \
+            "order/order-${GITHUB_SHA}.zip" \
+            "authorizer/authorizer-${GITHUB_SHA}.zip" \
+            "report/report-${GITHUB_SHA}.zip" \
+            "schema/schema-runner-${GITHUB_SHA}.zip"
+          do
+            echo "Checking s3://${LAMBDA_BUCKET}/${key}"
+            aws s3api head-object \
+              --bucket "$LAMBDA_BUCKET" \
+              --key "$key" \
+              --region "$AWS_REGION"
+          done
 
           aws s3api head-object \
             --bucket "$REPORTS_BUCKET" \
@@ -577,18 +575,10 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get Lambda bucket
-        run: |
-          LAMBDA_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name "$DATA_STACK" \
-            --region "$AWS_REGION" \
-            --query "Stacks[0].Outputs[?OutputKey=='LambdaBucket'].OutputValue" \
-            --output text)
-
-          echo "LAMBDA_BUCKET=$LAMBDA_BUCKET" >> "$GITHUB_ENV"
-
       - name: Deploy Schema stack
         run: |
+          set -euo pipefail
+
           aws cloudformation deploy \
             --stack-name "$SCHEMA_STACK" \
             --template-file cloudformation/schema-stack.yaml \
@@ -602,6 +592,8 @@ jobs:
 
       - name: Verify Schema stack
         run: |
+          set -euo pipefail
+
           STATUS=$(aws cloudformation describe-stacks \
             --stack-name "$SCHEMA_STACK" \
             --region "$AWS_REGION" \
@@ -612,7 +604,10 @@ jobs:
 
           case "$STATUS" in
             CREATE_COMPLETE|UPDATE_COMPLETE) ;;
-            *) echo "Schema stack is not ready."; exit 1 ;;
+            *)
+              echo "ERROR: Schema stack is not ready."
+              exit 1
+              ;;
           esac
 
       - name: Verify Schema Runner Lambda
@@ -620,8 +615,26 @@ jobs:
           aws lambda get-function \
             --function-name "CloudMart-${ENVIRONMENT}-SchemaRunner" \
             --region "$AWS_REGION" \
-            --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler}' \
+            --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler,State:State}' \
             --output table
+
+      - name: Apply database schema
+        run: |
+          set -euo pipefail
+
+          aws lambda invoke \
+            --function-name "CloudMart-${ENVIRONMENT}-SchemaRunner" \
+            --invocation-type RequestResponse \
+            --payload '{}' \
+            --cli-binary-format raw-in-base64-out \
+            schema-response.json \
+            --region "$AWS_REGION"
+
+          echo "Schema Runner response:"
+          cat schema-response.json
+
+          grep -q '"statusCode": 200' schema-response.json
+          echo "Database schema applied successfully."
 
 
   # =========================================================
@@ -644,16 +657,18 @@ jobs:
 
       - name: Deploy Auth stack
         run: |
+          set -euo pipefail
+
           aws cloudformation deploy \
             --stack-name "$AUTH_STACK" \
             --template-file cloudformation/Auth-stack.yaml \
             --parameter-overrides \
               Environment="$ENVIRONMENT" \
-              DbHostParameterName="/cloudmart/${ENVIRONMENT}/db/host" \
-              DbPortParameterName="/cloudmart/${ENVIRONMENT}/db/port" \
-              DbNameParameterName="/cloudmart/${ENVIRONMENT}/db/name" \
-              DbUsernameParameterName="/cloudmart/${ENVIRONMENT}/db/username" \
-              DbPasswordParameterName="/cloudmart/${ENVIRONMENT}/db/password" \
+              DbHostParameterName="/cloudmart/$ENVIRONMENT/db/host" \
+              DbPortParameterName="/cloudmart/$ENVIRONMENT/db/port" \
+              DbNameParameterName="/cloudmart/$ENVIRONMENT/db/name" \
+              DbUsernameParameterName="/cloudmart/$ENVIRONMENT/db/username" \
+              DbPasswordParameterName="/cloudmart/$ENVIRONMENT/db/password" \
               LambdaS3Key="authorizer/authorizer-${GITHUB_SHA}.zip" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
@@ -661,6 +676,8 @@ jobs:
 
       - name: Verify Auth stack
         run: |
+          set -euo pipefail
+
           STATUS=$(aws cloudformation describe-stacks \
             --stack-name "$AUTH_STACK" \
             --region "$AWS_REGION" \
@@ -671,7 +688,10 @@ jobs:
 
           case "$STATUS" in
             CREATE_COMPLETE|UPDATE_COMPLETE) ;;
-            *) echo "Auth stack is not ready."; exit 1 ;;
+            *)
+              echo "ERROR: Auth stack is not ready."
+              exit 1
+              ;;
           esac
 
       - name: Verify Authorizer Lambda
@@ -679,12 +699,15 @@ jobs:
           aws lambda get-function \
             --function-name "CloudMart-${ENVIRONMENT}-Authorizer" \
             --region "$AWS_REGION" \
-            --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler}' \
+            --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler,State:State}' \
             --output table
 
 
   # =========================================================
   # 8. API
+  # =========================================================
+  # api-stack.yaml owns API Gateway, Product Lambda, Order Lambda,
+  # Inventory Alert Lambda, EventBridge and SNS resources.
   # =========================================================
   api:
     name: 8 - API
@@ -703,6 +726,8 @@ jobs:
 
       - name: Deploy API stack
         run: |
+          set -euo pipefail
+
           aws cloudformation deploy \
             --stack-name "$API_STACK" \
             --template-file cloudformation/api-stack.yaml \
@@ -710,15 +735,17 @@ jobs:
               Environment="$ENVIRONMENT" \
               LambdaS3Key="product/product-${GITHUB_SHA}.zip" \
               InventoryAlertLambdaS3Key="inventory-alert/inventory-alert-${GITHUB_SHA}.zip" \
+              LowStockEmail="/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
               OrderLambdaS3Key="order/order-${GITHUB_SHA}.zip" \
-              LowStockEmail="/cloudmart/${ENVIRONMENT}/notifications/low-stock-email" \
-              OrderEmail="/cloudmart/${ENVIRONMENT}/notifications/order-email" \
+              OrderEmail="/cloudmart/$ENVIRONMENT/notifications/order-email" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --region "$AWS_REGION"
 
       - name: Verify API stack
         run: |
+          set -euo pipefail
+
           STATUS=$(aws cloudformation describe-stacks \
             --stack-name "$API_STACK" \
             --region "$AWS_REGION" \
@@ -729,23 +756,18 @@ jobs:
 
           case "$STATUS" in
             CREATE_COMPLETE|UPDATE_COMPLETE) ;;
-            *) echo "API stack is not ready."; exit 1 ;;
+            *)
+              echo "ERROR: API stack is not ready."
+              exit 1
+              ;;
           esac
-
-      - name: Display API outputs
-        run: |
-          aws cloudformation describe-stacks \
-            --stack-name "$API_STACK" \
-            --region "$AWS_REGION" \
-            --query 'Stacks[0].Outputs' \
-            --output table
 
       - name: Verify Product Lambda
         run: |
           aws lambda get-function \
             --function-name "CloudMart-${ENVIRONMENT}-ProductLambda" \
             --region "$AWS_REGION" \
-            --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler}' \
+            --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler,State:State}' \
             --output table
 
       - name: Verify Order Lambda
@@ -753,7 +775,7 @@ jobs:
           aws lambda get-function \
             --function-name "CloudMart-${ENVIRONMENT}-OrderLambda" \
             --region "$AWS_REGION" \
-            --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler}' \
+            --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler,State:State}' \
             --output table
 
       - name: Verify Inventory Alert Lambda
@@ -761,7 +783,15 @@ jobs:
           aws lambda get-function \
             --function-name "CloudMart-${ENVIRONMENT}-InventoryAlert" \
             --region "$AWS_REGION" \
-            --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler}' \
+            --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler,State:State}' \
+            --output table
+
+      - name: Display API outputs
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name "$API_STACK" \
+            --region "$AWS_REGION" \
+            --query 'Stacks[0].Outputs' \
             --output table
 
 
@@ -783,8 +813,11 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Get bucket names from Data stack
+      - name: Get Reporting inputs from Data stack
+        id: data_outputs
         run: |
+          set -euo pipefail
+
           LAMBDA_BUCKET=$(aws cloudformation describe-stacks \
             --stack-name "$DATA_STACK" \
             --region "$AWS_REGION" \
@@ -797,32 +830,46 @@ jobs:
             --query "Stacks[0].Outputs[?OutputKey=='ReportsBucketName'].OutputValue" \
             --output text)
 
-          echo "LAMBDA_BUCKET=$LAMBDA_BUCKET" >> "$GITHUB_ENV"
-          echo "REPORTS_BUCKET=$REPORTS_BUCKET" >> "$GITHUB_ENV"
+          if [ -z "$LAMBDA_BUCKET" ] || [ "$LAMBDA_BUCKET" = "None" ]; then
+            echo "ERROR: LambdaBucket output not found."
+            exit 1
+          fi
+
+          if [ -z "$REPORTS_BUCKET" ] || [ "$REPORTS_BUCKET" = "None" ]; then
+            echo "ERROR: ReportsBucketName output not found."
+            exit 1
+          fi
+
+          echo "lambda_bucket=$LAMBDA_BUCKET" >> "$GITHUB_OUTPUT"
+          echo "reports_bucket=$REPORTS_BUCKET" >> "$GITHUB_OUTPUT"
 
       - name: Deploy Reporting stack
         run: |
+          set -euo pipefail
+
           aws cloudformation deploy \
             --stack-name "$REPORTING_STACK" \
             --template-file cloudformation/Reporting-stack.yaml \
             --parameter-overrides \
               Environment="$ENVIRONMENT" \
-              LambdaS3Bucket="$LAMBDA_BUCKET" \
+              LambdaS3Bucket="${{ steps.data_outputs.outputs.lambda_bucket }}" \
               LambdaS3Key="report/report-${GITHUB_SHA}.zip" \
-              ReportsBucketName="$REPORTS_BUCKET" \
-              DashboardS3Bucket="$REPORTS_BUCKET" \
+              ReportsBucketName="${{ steps.data_outputs.outputs.reports_bucket }}" \
+              DashboardS3Bucket="${{ steps.data_outputs.outputs.reports_bucket }}" \
               DashboardS3Prefix="$DASHBOARD_S3_PREFIX" \
-              DbHostParameterName="/cloudmart/${ENVIRONMENT}/db/host" \
-              DbPortParameterName="/cloudmart/${ENVIRONMENT}/db/port" \
-              DbNameParameterName="/cloudmart/${ENVIRONMENT}/db/name" \
-              DbUsernameParameterName="/cloudmart/${ENVIRONMENT}/db/username" \
-              DbPasswordParameterName="/cloudmart/${ENVIRONMENT}/db/password" \
+              DbHostParameterName="/cloudmart/$ENVIRONMENT/db/host" \
+              DbPortParameterName="/cloudmart/$ENVIRONMENT/db/port" \
+              DbNameParameterName="/cloudmart/$ENVIRONMENT/db/name" \
+              DbUsernameParameterName="/cloudmart/$ENVIRONMENT/db/username" \
+              DbPasswordParameterName="/cloudmart/$ENVIRONMENT/db/password" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --region "$AWS_REGION"
 
       - name: Verify Reporting stack
         run: |
+          set -euo pipefail
+
           STATUS=$(aws cloudformation describe-stacks \
             --stack-name "$REPORTING_STACK" \
             --region "$AWS_REGION" \
@@ -833,7 +880,10 @@ jobs:
 
           case "$STATUS" in
             CREATE_COMPLETE|UPDATE_COMPLETE) ;;
-            *) echo "Reporting stack is not ready."; exit 1 ;;
+            *)
+              echo "ERROR: Reporting stack is not ready."
+              exit 1
+              ;;
           esac
 
       - name: Verify Report Generator Lambda
@@ -841,7 +891,7 @@ jobs:
           aws lambda get-function \
             --function-name "CloudMart-${ENVIRONMENT}-ReportGenerator" \
             --region "$AWS_REGION" \
-            --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler}' \
+            --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler,State:State}' \
             --output table
 
       - name: Display Reporting outputs
@@ -862,29 +912,23 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Validate monitoring email secret
-        env:
-          MONITORING_EMAIL: ${{ secrets.MONITORING_EMAIL }}
-        run: |
-          if [ -z "$MONITORING_EMAIL" ]; then
-            echo "ERROR: MONITORING_EMAIL secret is missing."
-            exit 1
-          fi
-          echo "Monitoring email is configured."
-
       - name: Deploy Monitoring stack
         env:
-          MONITORING_EMAIL: ${{ secrets.MONITORING_EMAIL }}
+          MONITORING_EMAIL: ${{ inputs.monitoring_email }}
         run: |
+          set -euo pipefail
+
+          if [ -z "$MONITORING_EMAIL" ]; then
+            echo "ERROR: monitoring_email workflow input is empty."
+            exit 1
+          fi
+
           aws cloudformation deploy \
             --stack-name "$MONITORING_STACK" \
             --template-file cloudformation/monitoring-stack.yaml \
@@ -897,6 +941,8 @@ jobs:
 
       - name: Verify Monitoring stack
         run: |
+          set -euo pipefail
+
           STATUS=$(aws cloudformation describe-stacks \
             --stack-name "$MONITORING_STACK" \
             --region "$AWS_REGION" \
@@ -907,7 +953,10 @@ jobs:
 
           case "$STATUS" in
             CREATE_COMPLETE|UPDATE_COMPLETE) ;;
-            *) echo "Monitoring stack is not ready."; exit 1 ;;
+            *)
+              echo "ERROR: Monitoring stack is not ready."
+              exit 1
+              ;;
           esac
 
       - name: Display Monitoring outputs
@@ -922,8 +971,8 @@ jobs:
   # =========================================================
   # 11. FINAL VERIFICATION
   # =========================================================
-  # No API/dashboard smoke tests are performed here.
-  # This stage verifies resource existence and stack outputs.
+  # No API/dashboard health tests are performed here.
+  # This stage checks stack/resource existence and configuration.
   # =========================================================
   verify:
     name: 11 - Final Verification
@@ -939,7 +988,7 @@ jobs:
 
       - name: Verify all CloudFormation stacks
         run: |
-          set -e
+          set -euo pipefail
 
           for stack in \
             "$NETWORK_STACK" \
@@ -961,13 +1010,16 @@ jobs:
 
             case "$STATUS" in
               CREATE_COMPLETE|UPDATE_COMPLETE) ;;
-              *) echo "ERROR: $stack is not complete."; exit 1 ;;
+              *)
+                echo "ERROR: $stack is not complete."
+                exit 1
+                ;;
             esac
           done
 
       - name: Verify all six Lambda functions
         run: |
-          set -e
+          set -euo pipefail
 
           for function_name in \
             "CloudMart-${ENVIRONMENT}-ProductLambda" \
@@ -977,30 +1029,34 @@ jobs:
             "CloudMart-${ENVIRONMENT}-ReportGenerator" \
             "CloudMart-${ENVIRONMENT}-SchemaRunner"
           do
+            echo "========================================"
             echo "Checking $function_name"
+            echo "========================================"
+
             aws lambda get-function \
               --function-name "$function_name" \
               --region "$AWS_REGION" \
-              --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler}' \
+              --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler,State:State}' \
               --output table
           done
 
-      - name: Verify important SSM parameters
+      - name: Verify SSM parameters
         run: |
-          set -e
+          set -euo pipefail
 
-          for parameter in \
-            "/cloudmart/${ENVIRONMENT}/db/password" \
-            "/cloudmart/${ENVIRONMENT}/db/host" \
-            "/cloudmart/${ENVIRONMENT}/db/port" \
-            "/cloudmart/${ENVIRONMENT}/db/name" \
-            "/cloudmart/${ENVIRONMENT}/db/username" \
-            "/cloudmart/${ENVIRONMENT}/notifications/order-email" \
-            "/cloudmart/${ENVIRONMENT}/notifications/low-stock-email" \
-            "/cloudmart/${ENVIRONMENT}/monitoring/email"
+          for name in \
+            "/cloudmart/$ENVIRONMENT/db/password" \
+            "/cloudmart/$ENVIRONMENT/db/host" \
+            "/cloudmart/$ENVIRONMENT/db/port" \
+            "/cloudmart/$ENVIRONMENT/db/name" \
+            "/cloudmart/$ENVIRONMENT/db/username" \
+            "/cloudmart/$ENVIRONMENT/notifications/order-email" \
+            "/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
+            "/cloudmart/$ENVIRONMENT/monitoring/email"
           do
+            echo "Checking $name"
             aws ssm get-parameter \
-              --name "$parameter" \
+              --name "$name" \
               --region "$AWS_REGION" \
               --query 'Parameter.{Name:Name,Type:Type}' \
               --output table
@@ -1008,7 +1064,7 @@ jobs:
 
       - name: Verify Lambda artifacts in S3
         run: |
-          set -e
+          set -euo pipefail
 
           LAMBDA_BUCKET=$(aws cloudformation describe-stacks \
             --stack-name "$DATA_STACK" \
@@ -1030,40 +1086,42 @@ jobs:
             "report/report-${GITHUB_SHA}.zip" \
             "schema/schema-runner-${GITHUB_SHA}.zip"
           do
-            echo "Checking s3://${LAMBDA_BUCKET}/${key}"
             aws s3api head-object \
               --bucket "$LAMBDA_BUCKET" \
               --key "$key" \
               --region "$AWS_REGION"
           done
 
-          for key in \
-            "${DASHBOARD_S3_PREFIX}/app.py" \
-            "${DASHBOARD_S3_PREFIX}/index.html"
-          do
-            echo "Checking s3://${REPORTS_BUCKET}/${key}"
-            aws s3api head-object \
-              --bucket "$REPORTS_BUCKET" \
-              --key "$key" \
-              --region "$AWS_REGION"
-          done
+          aws s3api head-object \
+            --bucket "$REPORTS_BUCKET" \
+            --key "${DASHBOARD_S3_PREFIX}/app.py" \
+            --region "$AWS_REGION"
+
+          aws s3api head-object \
+            --bucket "$REPORTS_BUCKET" \
+            --key "${DASHBOARD_S3_PREFIX}/index.html" \
+            --region "$AWS_REGION"
+
+          echo "All S3 artifacts verified."
 
       - name: Verify EventBridge rules
         run: |
+          set -euo pipefail
+
           aws events describe-rule \
             --name "CloudMart-${ENVIRONMENT}-DailyReport" \
             --region "$AWS_REGION" \
             --query '{Name:Name,State:State,ScheduleExpression:ScheduleExpression}' \
-            --output table || true
+            --output table
 
           aws events describe-rule \
             --name "CloudMart-${ENVIRONMENT}-InventoryChangedRule" \
             --event-bus-name "CloudMart-${ENVIRONMENT}-EventBus" \
             --region "$AWS_REGION" \
             --query '{Name:Name,State:State,EventBusName:EventBusName}' \
-            --output table || true
+            --output table
 
-      - name: Verify Monitoring dashboard
+      - name: Verify CloudWatch dashboard
         run: |
           aws cloudwatch get-dashboard \
             --dashboard-name "cloudmart-operations" \
@@ -1081,6 +1139,7 @@ jobs:
             echo "========================================"
             echo "$stack"
             echo "========================================"
+
             aws cloudformation describe-stacks \
               --stack-name "$stack" \
               --region "$AWS_REGION" \
@@ -1093,6 +1152,5 @@ jobs:
           echo "========================================"
           echo "CLOUDMART DEPLOYMENT COMPLETED"
           echo "========================================"
-          echo "Flow:"
           echo "Network -> SSM -> Data -> Security -> Artifacts -> Schema -> Auth -> API -> Reporting -> Monitoring -> Final Verification"
-          echo "No smoke tests were executed."
+          echo "No API/dashboard smoke tests were executed."
