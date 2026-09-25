@@ -391,6 +391,88 @@ def validate_customer(
 # CREATE ORDER
 # =========================================================
 
+# =========================================================
+# STORE FAILED ORDER
+# =========================================================
+def store_failed_order(
+    connection,
+    customer_id,
+    processed_items,
+    failure_reason
+):
+    """
+    Persist a business-level failed order.
+    """
+
+    total_amount = sum(
+        item.get("subtotal", 0)
+        for item in processed_items
+    )
+
+    with connection.cursor() as cursor:
+
+        cursor.execute(
+            """
+            INSERT INTO orders
+            (
+                customer_id,
+                total_amount,
+                status,
+                failure_reason
+            )
+            VALUES
+            (
+                %s,
+                %s,
+                %s,
+                %s
+            )
+            """,
+            (
+                customer_id,
+                total_amount,
+                "FAILED",
+                failure_reason
+            )
+        )
+
+        failed_order_id = cursor.lastrowid
+
+        for item in processed_items:
+
+            cursor.execute(
+                """
+                INSERT INTO order_items
+                (
+                    order_id,
+                    product_id,
+                    quantity,
+                    unit_price,
+                    subtotal
+                )
+                VALUES
+                (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s
+                )
+                """,
+                (
+                    failed_order_id,
+                    item["product_id"],
+                    item["quantity"],
+                    item.get("unit_price", 0),
+                    item.get("subtotal", 0)
+                )
+            )
+
+    connection.commit()
+
+    return failed_order_id
+
+
 def create_order(
     event,
     authenticated_user
@@ -531,8 +613,31 @@ def create_order(
                     }
                 )
 
+            if (
+                isinstance(product_id, str)
+                and not product_id.strip()
+            ):
+
+                return response(
+                    400,
+                    {
+                        "message":
+                            "productId value is required for every item"
+                    }
+                )
+
+            if isinstance(product_id, bool):
+
+                return response(
+                    400,
+                    {
+                        "message":
+                            "productId must be an integer"
+                    }
+                )
+
             # ---------------------------------------------
-            # QUANTITY REQUIRED
+            # QUANTITY REQUIRED / VALUE VALIDATION
             # ---------------------------------------------
 
             if quantity is None:
@@ -542,6 +647,29 @@ def create_order(
                     {
                         "message":
                             "quantity is required for every item"
+                    }
+                )
+
+            if (
+                isinstance(quantity, str)
+                and not quantity.strip()
+            ):
+
+                return response(
+                    400,
+                    {
+                        "message":
+                            "quantity value is required for every item"
+                    }
+                )
+
+            if isinstance(quantity, bool):
+
+                return response(
+                    400,
+                    {
+                        "message":
+                            "quantity must be an integer"
                     }
                 )
 
@@ -595,13 +723,23 @@ def create_order(
             # VALIDATE PRODUCT ID
             # ---------------------------------------------
 
-            if product_id <= 0:
+            if product_id < 0:
 
                 return response(
                     400,
                     {
                         "message":
-                            "productId must be greater than 0"
+                            "productId cannot be negative"
+                    }
+                )
+
+            if product_id == 0:
+
+                return response(
+                    400,
+                    {
+                        "message":
+                            "productId must be greater than zero"
                     }
                 )
 
@@ -609,13 +747,23 @@ def create_order(
             # VALIDATE QUANTITY
             # ---------------------------------------------
 
-            if quantity <= 0:
+            if quantity < 0:
 
                 return response(
                     400,
                     {
                         "message":
-                            "quantity must be greater than 0"
+                            "quantity cannot be negative"
+                    }
+                )
+
+            if quantity == 0:
+
+                return response(
+                    400,
+                    {
+                        "message":
+                            "quantity must be greater than zero"
                     }
                 )
 
@@ -1390,26 +1538,81 @@ def create_order(
 
     except ValueError as error:
 
+        failure_reason = str(error)
+        failed_order_id = order_id
+
         if connection:
 
-            connection.rollback()
+            try:
+                connection.rollback()
+            except Exception as rollback_error:
+                log_error(
+                    "order_failed_rollback_error",
+                    rollback_error,
+                    customer_id=customer_id
+                )
 
+            # Business-level failures that occur after the database
+            # processing stage are persisted as FAILED orders.
+            #
+            # Validation errors return before the DB connection is
+            # created, so they are not stored as orders.
+            if (
+                customer_id is not None
+                and validated_items
+                and not failed_order_id
+            ):
+
+                try:
+
+                    failed_items = processed_items or [
+                        {
+                            "product_id":
+                                item["product_id"],
+                            "quantity":
+                                item["quantity"],
+                            "unit_price":
+                                0,
+                            "subtotal":
+                                0
+                        }
+                        for item in validated_items
+                    ]
+
+                    failed_order_id = store_failed_order(
+                        connection,
+                        customer_id,
+                        failed_items,
+                        failure_reason
+                    )
+
+                    publish_metric(
+                        "OrdersFailed",
+                        1
+                    )
+
+                except Exception as persist_error:
+
+                    log_error(
+                        "failed_order_persistence_error",
+                        persist_error,
+                        customer_id=customer_id,
+                        reason=failure_reason
+                    )
 
         print(json.dumps({
             "event":
                 "order_failed",
 
+            "order_id":
+                failed_order_id,
+
             "reason":
-                str(error),
+                failure_reason,
 
             "customer_id":
                 customer_id
         }))
-
-
-        # ---------------------------------------------
-        # ORDER FAILED EVENT
-        # ---------------------------------------------
 
         try:
 
@@ -1417,7 +1620,7 @@ def create_order(
                 "OrderFailed",
                 {
                     "order_id":
-                        order_id,
+                        failed_order_id,
 
                     "customer_id":
                         customer_id,
@@ -1438,7 +1641,7 @@ def create_order(
                         "FAILED",
 
                     "reason":
-                        str(error)
+                        failure_reason
                 }
             )
 
@@ -1452,15 +1655,20 @@ def create_order(
                     str(event_error)
             }))
 
-
         return response(
             400,
             {
                 "message":
                     "Order could not be processed",
 
+                "order_id":
+                    failed_order_id,
+
+                "status":
+                    "FAILED",
+
                 "reason":
-                    str(error)
+                    failure_reason
             }
         )
 
@@ -2309,7 +2517,7 @@ def get_orders(
 
         requested_customer_id = (
             query_parameters.get(
-                "customerId"
+                "customer_id"
             )
         )
 
@@ -2522,6 +2730,16 @@ def get_orders(
         # =================================================
         # RESPONSE
         # =================================================
+
+        if not orders:
+
+            return response(
+                200,
+                {
+                    "message":
+                        "No orders"
+                }
+            )
 
         return response(
             200,
