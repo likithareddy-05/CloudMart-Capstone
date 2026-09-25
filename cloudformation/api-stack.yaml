@@ -254,6 +254,14 @@ Resources:
         Fn::ImportValue:
           !Sub CloudMart-${Environment}-InventoryAlertLambdaRoleArn
 
+      VpcConfig:
+        SubnetIds:
+          - !ImportValue
+              Fn::Sub: CloudMart-${Environment}-PrivateSubnetId
+        SecurityGroupIds:
+          - !ImportValue
+              Fn::Sub: CloudMart-${Environment}-LambdaSecurityGroupId
+
       Environment:
 
         Variables:
