@@ -503,56 +503,28 @@ def lambda_handler(
                 and not product_id
             ):
 
-                # ADMIN -> ALL PRODUCTS
-                # Includes deleted products and is_deleted.
-
-                if user_role == "ADMIN":
-
-                    cursor.execute(
-                        """
-                        SELECT
-                            p.product_id,
-                            p.name,
-                            p.description,
-                            p.price,
-                            p.category,
-                            i.stock_count,
-                            i.low_stock_threshold,
-                            p.created_at,
-                            p.updated_at,
-                            p.is_deleted
-                        FROM products p
-                        LEFT JOIN inventory i
-                            ON p.product_id =
-                               i.product_id
-                        ORDER BY p.product_id
-                        """
-                    )
-
-                # USER -> ONLY AVAILABLE PRODUCTS
-
-                else:
-
-                    cursor.execute(
-                        """
-                        SELECT
-                            p.product_id,
-                            p.name,
-                            p.description,
-                            p.price,
-                            p.category,
-                            i.stock_count,
-                            i.low_stock_threshold,
-                            p.created_at,
-                            p.updated_at
-                        FROM products p
-                        LEFT JOIN inventory i
-                            ON p.product_id =
-                               i.product_id
-                        WHERE p.is_deleted = FALSE
-                        ORDER BY p.product_id
-                        """
-                    )
+                # GET product listing is public.
+                # Only active products are returned.
+                cursor.execute(
+                    """
+                    SELECT
+                        p.product_id,
+                        p.name,
+                        p.description,
+                        p.price,
+                        p.category,
+                        i.stock_count,
+                        i.low_stock_threshold,
+                        p.created_at,
+                        p.updated_at
+                    FROM products p
+                    LEFT JOIN inventory i
+                        ON p.product_id =
+                           i.product_id
+                    WHERE p.is_deleted = FALSE
+                    ORDER BY p.product_id
+                    """
+                )
 
                 products = cursor.fetchall()
 
@@ -578,64 +550,35 @@ def lambda_handler(
                 and product_id
             ):
 
-                # ADMIN -> ACTIVE + DELETED PRODUCT
-
+                # GET by ID is also public.
+                # Only active products are returned.
                 log_event(
                     "product_query_started",
                     operation="get_product_by_id",
-                    product_id=product_id,
-                    role=user_role
+                    product_id=product_id
                 )
 
-                if user_role == "ADMIN":
-
-                    cursor.execute(
-                        """
-                        SELECT
-                            p.product_id,
-                            p.name,
-                            p.description,
-                            p.price,
-                            p.category,
-                            i.stock_count,
-                            i.low_stock_threshold,
-                            p.created_at,
-                            p.updated_at,
-                            p.is_deleted
-                        FROM products p
-                        LEFT JOIN inventory i
-                            ON p.product_id =
-                               i.product_id
-                        WHERE p.product_id = %s
-                        """,
-                        (product_id,)
-                    )
-
-                # USER -> ONLY AVAILABLE PRODUCT
-
-                else:
-
-                    cursor.execute(
-                        """
-                        SELECT
-                            p.product_id,
-                            p.name,
-                            p.description,
-                            p.price,
-                            p.category,
-                            i.stock_count,
-                            i.low_stock_threshold,
-                            p.created_at,
-                            p.updated_at
-                        FROM products p
-                        LEFT JOIN inventory i
-                            ON p.product_id =
-                               i.product_id
-                        WHERE p.product_id = %s
-                          AND p.is_deleted = FALSE
-                        """,
-                        (product_id,)
-                    )
+                cursor.execute(
+                    """
+                    SELECT
+                        p.product_id,
+                        p.name,
+                        p.description,
+                        p.price,
+                        p.category,
+                        i.stock_count,
+                        i.low_stock_threshold,
+                        p.created_at,
+                        p.updated_at
+                    FROM products p
+                    LEFT JOIN inventory i
+                        ON p.product_id =
+                           i.product_id
+                    WHERE p.product_id = %s
+                      AND p.is_deleted = FALSE
+                    """,
+                    (product_id,)
+                )
 
                 product = cursor.fetchone()
 
@@ -709,13 +652,11 @@ def lambda_handler(
                 # =================================================
 
                 stock_count = body.get(
-                    "stock_count",
-                    0
+                    "stock_count"
                 )
 
                 low_stock_threshold = body.get(
-                    "low_stock_threshold",
-                    10
+                    "low_stock_threshold"
                 )
 
 
@@ -723,22 +664,33 @@ def lambda_handler(
                 # VALIDATE NAME
                 # =================================================
 
-                if (
-                    name is None
-                    or not isinstance(
-                        name,
-                        str
-                    )
-                    or not name.strip()
-                ):
-
+                if "name" not in body:
                     return create_response(
-
                         400,
-
                         {
                             "message":
                                 "name is required"
+                        }
+                    )
+
+                if not isinstance(
+                    name,
+                    str
+                ):
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "name must be a string"
+                        }
+                    )
+
+                if not name.strip():
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "name cannot be empty"
                         }
                     )
 
@@ -746,69 +698,144 @@ def lambda_handler(
 
 
                 # =================================================
+                # VALIDATE DESCRIPTION
+                # =================================================
+
+                if "description" not in body:
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "description is required"
+                        }
+                    )
+
+                if not isinstance(
+                    description,
+                    str
+                ):
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "description must be a string"
+                        }
+                    )
+
+                if not description.strip():
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "description cannot be empty"
+                        }
+                    )
+
+                description = description.strip()
+
+
+                # =================================================
+                # VALIDATE CATEGORY
+                # =================================================
+
+                if "category" not in body:
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "category is required"
+                        }
+                    )
+
+                if not isinstance(
+                    category,
+                    str
+                ):
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "category must be a string"
+                        }
+                    )
+
+                if not category.strip():
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "category cannot be empty"
+                        }
+                    )
+
+                category = category.strip()
+
+
+                # =================================================
                 # VALIDATE PRICE
                 # =================================================
 
-                if price is None:
-
+                if "price" not in body:
                     return create_response(
-
                         400,
-
                         {
                             "message":
                                 "price is required"
                         }
                     )
 
+                if price == "":
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "price cannot be empty"
+                        }
+                    )
 
                 if isinstance(
                     price,
                     bool
                 ):
-
                     return create_response(
-
                         400,
-
                         {
                             "message":
                                 "price must be a number"
                         }
                     )
 
-
                 try:
-
                     price_value = float(
                         price
                     )
-
                 except (
                     TypeError,
                     ValueError
                 ):
-
                     return create_response(
-
                         400,
-
                         {
                             "message":
                                 "price must be a number"
                         }
                     )
 
-
-                if price_value <= 0:
-
+                if price_value < 0:
                     return create_response(
-
                         400,
-
                         {
                             "message":
-                                "price must be greater than 0"
+                                "price cannot be negative"
+                        }
+                    )
+
+                if price_value == 0:
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "price must be greater than zero"
                         }
                     )
 
@@ -817,6 +844,24 @@ def lambda_handler(
                 # VALIDATE STOCK COUNT
                 # =================================================
 
+                if "stock_count" not in body:
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "stock_count is required"
+                        }
+                    )
+
+                if stock_count == "":
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "stock_count cannot be empty"
+                        }
+                    )
+
                 if (
                     not isinstance(
                         stock_count,
@@ -827,27 +872,29 @@ def lambda_handler(
                         bool
                     )
                 ):
-
                     return create_response(
-
                         400,
-
                         {
                             "message":
                                 "stock_count must be an integer"
                         }
                     )
 
-
                 if stock_count < 0:
-
                     return create_response(
-
                         400,
-
                         {
                             "message":
                                 "stock_count cannot be negative"
+                        }
+                    )
+
+                if stock_count == 0:
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "stock_count must be greater than zero"
                         }
                     )
 
@@ -856,6 +903,24 @@ def lambda_handler(
                 # VALIDATE LOW STOCK THRESHOLD
                 # =================================================
 
+                if "low_stock_threshold" not in body:
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "low_stock_threshold is required"
+                        }
+                    )
+
+                if low_stock_threshold == "":
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "low_stock_threshold cannot be empty"
+                        }
+                    )
+
                 if (
                     not isinstance(
                         low_stock_threshold,
@@ -866,29 +931,29 @@ def lambda_handler(
                         bool
                     )
                 ):
-
                     return create_response(
-
                         400,
-
                         {
                             "message":
-                                "low_stock_threshold "
-                                "must be an integer"
+                                "low_stock_threshold must be an integer"
                         }
                     )
 
-
                 if low_stock_threshold < 0:
-
                     return create_response(
-
                         400,
-
                         {
                             "message":
-                                "low_stock_threshold "
-                                "cannot be negative"
+                                "low_stock_threshold cannot be negative"
+                        }
+                    )
+
+                if low_stock_threshold == 0:
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "low_stock_threshold must be greater than zero"
                         }
                     )
 
@@ -1106,26 +1171,95 @@ def lambda_handler(
                 # VALIDATE NAME
                 # =================================================
 
-                if (
-                    name is None
-                    or not isinstance(
-                        name,
-                        str
-                    )
-                    or not name.strip()
-                ):
-
+                if "name" not in body:
                     return create_response(
-
                         400,
-
                         {
                             "message":
                                 "name is required"
                         }
                     )
 
+                if not isinstance(
+                    name,
+                    str
+                ):
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "name must be a string"
+                        }
+                    )
+
+                if not name.strip():
+                    return create_response(
+                        400,
+                        {
+                            "message":
+                                "name cannot be empty"
+                        }
+                    )
+
                 name = name.strip()
+
+
+                # =================================================
+                # VALIDATE DESCRIPTION
+                # =================================================
+
+                if description is not None:
+                    if not isinstance(
+                        description,
+                        str
+                    ):
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "description must be a string"
+                            }
+                        )
+
+                    if not description.strip():
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "description cannot be empty"
+                            }
+                        )
+
+                    description = description.strip()
+
+
+                # =================================================
+                # VALIDATE CATEGORY
+                # =================================================
+
+                if category is not None:
+                    if not isinstance(
+                        category,
+                        str
+                    ):
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "category must be a string"
+                            }
+                        )
+
+                    if not category.strip():
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "category cannot be empty"
+                            }
+                        )
+
+                    category = category.strip()
 
 
                 # =================================================
@@ -1134,58 +1268,62 @@ def lambda_handler(
 
                 if price is not None:
 
+                    if price == "":
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "price cannot be empty"
+                            }
+                        )
+
                     if isinstance(
                         price,
                         bool
                     ):
-
                         return create_response(
-
                             400,
-
                             {
                                 "message":
                                     "price must be a number"
                             }
                         )
 
-
                     try:
-
                         price_value = float(
                             price
                         )
-
                     except (
                         TypeError,
                         ValueError
                     ):
-
                         return create_response(
-
                             400,
-
                             {
                                 "message":
                                     "price must be a number"
                             }
                         )
 
-
-                    if price_value <= 0:
-
+                    if price_value < 0:
                         return create_response(
-
                             400,
-
                             {
                                 "message":
-                                    "price must be greater than 0"
+                                    "price cannot be negative"
+                            }
+                        )
+
+                    if price_value == 0:
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "price must be greater than zero"
                             }
                         )
 
                 else:
-
                     price_value = None
 
 
@@ -1194,6 +1332,15 @@ def lambda_handler(
                 # =================================================
 
                 if stock_count is not None:
+
+                    if stock_count == "":
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "stock_count cannot be empty"
+                            }
+                        )
 
                     if (
                         not isinstance(
@@ -1205,29 +1352,29 @@ def lambda_handler(
                             bool
                         )
                     ):
-
                         return create_response(
-
                             400,
-
                             {
                                 "message":
-                                    "stock_count "
-                                    "must be an integer"
+                                    "stock_count must be an integer"
                             }
                         )
 
-
                     if stock_count < 0:
-
                         return create_response(
-
                             400,
-
                             {
                                 "message":
-                                    "stock_count "
-                                    "cannot be negative"
+                                    "stock_count cannot be negative"
+                            }
+                        )
+
+                    if stock_count == 0:
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "stock_count must be greater than zero"
                             }
                         )
 
@@ -1238,6 +1385,15 @@ def lambda_handler(
 
                 if low_stock_threshold is not None:
 
+                    if low_stock_threshold == "":
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "low_stock_threshold cannot be empty"
+                            }
+                        )
+
                     if (
                         not isinstance(
                             low_stock_threshold,
@@ -1248,29 +1404,29 @@ def lambda_handler(
                             bool
                         )
                     ):
-
                         return create_response(
-
                             400,
-
                             {
                                 "message":
-                                    "low_stock_threshold "
-                                    "must be an integer"
+                                    "low_stock_threshold must be an integer"
                             }
                         )
 
-
                     if low_stock_threshold < 0:
-
                         return create_response(
-
                             400,
-
                             {
                                 "message":
-                                    "low_stock_threshold "
-                                    "cannot be negative"
+                                    "low_stock_threshold cannot be negative"
+                            }
+                        )
+
+                    if low_stock_threshold == 0:
+                        return create_response(
+                            400,
+                            {
+                                "message":
+                                    "low_stock_threshold must be greater than zero"
                             }
                         )
 

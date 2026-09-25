@@ -904,11 +904,10 @@ Resources:
       HttpMethod:
         GET
 
+      # Public read access:
+      # Anyone can view products without an Authorization token.
       AuthorizationType:
-        CUSTOM
-
-      AuthorizerId:
-        !Ref Authorizer
+        NONE
 
       Integration:
 
@@ -986,11 +985,10 @@ Resources:
       HttpMethod:
         GET
 
+      # Public read access:
+      # Anyone can view a product by ID without an Authorization token.
       AuthorizationType:
-        CUSTOM
-
-      AuthorizerId:
-        !Ref Authorizer
+        NONE
 
       Integration:
 
