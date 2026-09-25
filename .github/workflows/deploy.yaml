@@ -1,0 +1,885 @@
+name: Deploy CloudMart - All Stacks
+
+on:
+  workflow_dispatch:
+    inputs:
+      order_email:
+        description: 'Order notification email. Leave blank to keep an existing SSM value.'
+        required: false
+        type: string
+      low_stock_email:
+        description: 'Low-stock notification email. Leave blank to keep an existing SSM value.'
+        required: false
+        type: string
+      monitoring_email:
+        description: 'Monitoring alarm email. Leave blank only if the monitoring stack already exists.'
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: cloudmart-all-deployment
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: ap-south-1
+  ENVIRONMENT: dev
+
+jobs:
+
+  # ============================================================
+  # 1. BOOTSTRAP
+  # ============================================================
+  # Data-stack.yaml uses an SSM SecureString dynamic reference for
+  # the RDS master password, so that parameter MUST exist before
+  # the Data stack is created.
+  # ============================================================
+  bootstrap:
+    name: Bootstrap and Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Verify required secret
+        env:
+          DB_PASSWORD: ${{ secrets.CLOUDMART_DB_PASSWORD }}
+        run: |
+          if [ -z "$DB_PASSWORD" ]; then
+            echo "ERROR: GitHub secret CLOUDMART_DB_PASSWORD is missing."
+            exit 1
+          fi
+          echo "Database password secret is available."
+
+      - name: Validate all CloudFormation templates
+        run: |
+          set -euo pipefail
+          for template in \
+            cloudformation/Network-stack.yaml \
+            cloudformation/Data-stack.yaml \
+            cloudformation/Security-stack.yaml \
+            cloudformation/schema-stack.yaml \
+            cloudformation/Auth-stack.yaml \
+            cloudformation/api-stack.yaml \
+            cloudformation/Reporting-stack.yaml \
+            cloudformation/monitoring-stack.yaml
+          do
+            echo "Validating $template"
+            aws cloudformation validate-template \
+              --template-body "file://$template" \
+              --region "$AWS_REGION" >/dev/null
+          done
+          echo "All CloudFormation templates passed validation."
+
+      - name: Seed RDS master password in SSM
+        env:
+          DB_PASSWORD: ${{ secrets.CLOUDMART_DB_PASSWORD }}
+        run: |
+          aws ssm put-parameter \
+            --name "/cloudmart/$ENVIRONMENT/db/password" \
+            --type SecureString \
+            --value "$DB_PASSWORD" \
+            --overwrite \
+            --region "$AWS_REGION"
+          echo "RDS master password SSM parameter is ready."
+
+
+  # ============================================================
+  # 2. NETWORK
+  # ============================================================
+  network:
+    name: Deploy Network Stack
+    needs: bootstrap
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Network stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name "cloudmart-${ENVIRONMENT}-network" \
+            --template-file cloudformation/Network-stack.yaml \
+            --parameter-overrides Environment="$ENVIRONMENT" \
+            --region "$AWS_REGION" \
+            --no-fail-on-empty-changeset
+
+      - name: Verify Network stack
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-network" \
+            --region "$AWS_REGION" \
+            --query 'Stacks[0].StackStatus' \
+            --output text
+
+
+  # ============================================================
+  # 3. DATA
+  # ============================================================
+  data:
+    name: Deploy Data Stack
+    needs: [bootstrap, network]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Data stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
+            --template-file cloudformation/Data-stack.yaml \
+            --parameter-overrides \
+              Environment="$ENVIRONMENT" \
+              DBName=cloudmart \
+              DBUsername=cloudmartadmin \
+            --region "$AWS_REGION" \
+            --no-fail-on-empty-changeset
+
+      - name: Verify Data stack and required buckets
+        run: |
+          STATUS=$(aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
+            --region "$AWS_REGION" \
+            --query 'Stacks[0].StackStatus' --output text)
+          test "$STATUS" = CREATE_COMPLETE || test "$STATUS" = UPDATE_COMPLETE
+
+          LAMBDA_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='LambdaBucket'].OutputValue" \
+            --output text)
+
+          REPORTS_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ReportsBucketName'].OutputValue" \
+            --output text)
+
+          test -n "$LAMBDA_BUCKET" && test "$LAMBDA_BUCKET" != None
+          test -n "$REPORTS_BUCKET" && test "$REPORTS_BUCKET" != None
+
+          aws s3api head-bucket --bucket "$LAMBDA_BUCKET" --region "$AWS_REGION"
+          aws s3api head-bucket --bucket "$REPORTS_BUCKET" --region "$AWS_REGION"
+
+          echo "Lambda bucket: $LAMBDA_BUCKET"
+          echo "Reports bucket: $REPORTS_BUCKET"
+
+
+  # ============================================================
+  # 4. SECURITY
+  # ============================================================
+  security:
+    name: Deploy Security Stack
+    needs: data
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get Reports bucket for dashboard IAM policy
+        id: buckets
+        run: |
+          REPORTS_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ReportsBucketName'].OutputValue" \
+            --output text)
+          test -n "$REPORTS_BUCKET" && test "$REPORTS_BUCKET" != None
+          echo "reports_bucket=$REPORTS_BUCKET" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy Security stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name "cloudmart-${ENVIRONMENT}-security" \
+            --template-file cloudformation/Security-stack.yaml \
+            --parameter-overrides \
+              Environment="$ENVIRONMENT" \
+              DashboardS3Bucket="${{ steps.buckets.outputs.reports_bucket }}" \
+              DashboardS3Prefix=cloudmart-dashboard \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION" \
+            --no-fail-on-empty-changeset
+
+
+  # ============================================================
+  # 5. SSM APPLICATION PARAMETERS
+  # ============================================================
+  # Data-stack owns DB host/port/name/username parameters.
+  # This job verifies them and creates the non-CFN notification
+  # parameters consumed by api-stack.
+  # ============================================================
+  ssm:
+    name: Configure SSM Parameters
+    needs: security
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify DB parameters created by Data stack
+        run: |
+          set -euo pipefail
+          for name in \
+            "/cloudmart/$ENVIRONMENT/db/host" \
+            "/cloudmart/$ENVIRONMENT/db/port" \
+            "/cloudmart/$ENVIRONMENT/db/name" \
+            "/cloudmart/$ENVIRONMENT/db/username" \
+            "/cloudmart/$ENVIRONMENT/db/password"
+          do
+            aws ssm get-parameter --name "$name" --region "$AWS_REGION" >/dev/null
+            echo "Verified $name"
+          done
+
+      - name: Create or preserve notification parameters
+        env:
+          ORDER_EMAIL_INPUT: ${{ inputs.order_email }}
+          LOW_STOCK_EMAIL_INPUT: ${{ inputs.low_stock_email }}
+        run: |
+          set -euo pipefail
+
+          put_or_preserve() {
+            local name="$1"
+            local value="$2"
+            local label="$3"
+
+            if [ -n "$value" ]; then
+              aws ssm put-parameter \
+                --name "$name" \
+                --type String \
+                --value "$value" \
+                --overwrite \
+                --region "$AWS_REGION"
+              echo "$label parameter created/updated."
+            elif aws ssm get-parameter --name "$name" --region "$AWS_REGION" >/dev/null 2>&1; then
+              echo "$label parameter already exists; preserving it."
+            else
+              echo "ERROR: $label parameter does not exist and no workflow input was supplied."
+              exit 1
+            fi
+          }
+
+          put_or_preserve \
+            "/cloudmart/$ENVIRONMENT/notifications/order-email" \
+            "$ORDER_EMAIL_INPUT" \
+            "Order email"
+
+          put_or_preserve \
+            "/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
+            "$LOW_STOCK_EMAIL_INPUT" \
+            "Low-stock email"
+
+          aws ssm put-parameter \
+            --name "/cloudmart/$ENVIRONMENT/auth/user-id" \
+            --type String --value "1" --overwrite --region "$AWS_REGION"
+
+          aws ssm put-parameter \
+            --name "/cloudmart/$ENVIRONMENT/auth/admin-id" \
+            --type String --value "2" --overwrite --region "$AWS_REGION"
+
+      - name: Verify notification parameters
+        run: |
+          aws ssm get-parameter \
+            --name "/cloudmart/$ENVIRONMENT/notifications/order-email" \
+            --region "$AWS_REGION" >/dev/null
+          aws ssm get-parameter \
+            --name "/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
+            --region "$AWS_REGION" >/dev/null
+          echo "Notification parameters verified."
+
+
+  # ============================================================
+  # 6. PACKAGE AND UPLOAD ALL LAMBDA ARTIFACTS + DASHBOARD
+  # ============================================================
+  artifacts:
+    name: Package and Upload Application Artifacts
+    needs: [ssm, security]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get S3 buckets
+        id: buckets
+        run: |
+          LAMBDA_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='LambdaBucket'].OutputValue" \
+            --output text)
+          REPORTS_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ReportsBucketName'].OutputValue" \
+            --output text)
+          echo "lambda_bucket=$LAMBDA_BUCKET" >> "$GITHUB_OUTPUT"
+          echo "reports_bucket=$REPORTS_BUCKET" >> "$GITHUB_OUTPUT"
+
+      - name: Install packaging tools
+        run: python -m pip install --upgrade pip
+
+      - name: Package Product Lambda
+        run: |
+          rm -rf build/product
+          mkdir -p build/product
+          python -m pip install PyMySQL --target build/product
+          cp lambda/product/lambda_function.py build/product/
+          (cd build/product && zip -qr ../../product.zip .)
+
+      - name: Package Inventory Alert Lambda
+        run: |
+          rm -rf build/inventory-alert
+          mkdir -p build/inventory-alert
+          cp lambda/inventory-alert/lambda_function.py build/inventory-alert/
+          (cd build/inventory-alert && zip -qr ../../inventory-alert.zip .)
+
+      - name: Package Order Lambda
+        run: |
+          rm -rf build/order
+          mkdir -p build/order
+          python -m pip install PyMySQL --target build/order
+          cp lambda/order/lambda_function.py build/order/
+          (cd build/order && zip -qr ../../order.zip .)
+
+      - name: Package Authorizer Lambda
+        run: |
+          rm -rf build/authorizer
+          mkdir -p build/authorizer
+          python -m pip install PyMySQL --target build/authorizer
+          cp lambda/authorizer/lambda_function.py build/authorizer/
+          (cd build/authorizer && zip -qr ../../authorizer.zip .)
+
+      - name: Package Report Generator Lambda
+        run: |
+          rm -rf build/report
+          mkdir -p build/report
+          python -m pip install PyMySQL --target build/report
+          cp lambda/report/lambda_function.py build/report/lambda_function.py
+          (cd build/report && zip -qr ../../report.zip .)
+
+      - name: Package Schema Runner Lambda
+        run: |
+          rm -rf build/schema
+          mkdir -p build/schema
+          python -m pip install PyMySQL --target build/schema
+          cp lambda/schema-runner/lambda_function.py build/schema/lambda_function.py
+          cp database/schema.sql build/schema/schema.sql
+          (cd build/schema && zip -qr ../../schema-runner.zip .)
+
+      - name: Verify packages
+        run: |
+          set -euo pipefail
+          for f in product.zip inventory-alert.zip order.zip authorizer.zip report.zip schema-runner.zip; do
+            test -s "$f"
+            unzip -tq "$f"
+            echo "Verified $f"
+          done
+
+      - name: Upload Lambda packages and dashboard
+        env:
+          LAMBDA_BUCKET: ${{ steps.buckets.outputs.lambda_bucket }}
+          REPORTS_BUCKET: ${{ steps.buckets.outputs.reports_bucket }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          aws s3 cp product.zip \
+            "s3://$LAMBDA_BUCKET/product/product-$SHA.zip"
+          aws s3 cp inventory-alert.zip \
+            "s3://$LAMBDA_BUCKET/inventory-alert/inventory-alert-$SHA.zip"
+          aws s3 cp order.zip \
+            "s3://$LAMBDA_BUCKET/order/order-$SHA.zip"
+          aws s3 cp authorizer.zip \
+            "s3://$LAMBDA_BUCKET/authorizer/authorizer-$SHA.zip"
+          aws s3 cp report.zip \
+            "s3://$LAMBDA_BUCKET/report/report-$SHA.zip"
+          aws s3 cp schema-runner.zip \
+            "s3://$LAMBDA_BUCKET/schema/schema-runner-$SHA.zip"
+
+          aws s3 cp dashboard/app.py \
+            "s3://$REPORTS_BUCKET/cloudmart-dashboard/app.py"
+          aws s3 cp dashboard/index.html \
+            "s3://$REPORTS_BUCKET/cloudmart-dashboard/index.html"
+
+          for key in \
+            "product/product-$SHA.zip" \
+            "inventory-alert/inventory-alert-$SHA.zip" \
+            "order/order-$SHA.zip" \
+            "authorizer/authorizer-$SHA.zip" \
+            "report/report-$SHA.zip" \
+            "schema/schema-runner-$SHA.zip"
+          do
+            aws s3api head-object --bucket "$LAMBDA_BUCKET" --key "$key" --region "$AWS_REGION" >/dev/null
+          done
+
+          aws s3api head-object --bucket "$REPORTS_BUCKET" --key cloudmart-dashboard/app.py --region "$AWS_REGION" >/dev/null
+          aws s3api head-object --bucket "$REPORTS_BUCKET" --key cloudmart-dashboard/index.html --region "$AWS_REGION" >/dev/null
+
+          echo "All Lambda packages and dashboard files uploaded successfully."
+
+
+  # ============================================================
+  # 7. DATABASE SCHEMA
+  # ============================================================
+  schema:
+    name: Deploy and Apply Database Schema
+    needs: [security, ssm, artifacts]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get Lambda bucket
+        id: bucket
+        run: |
+          LAMBDA_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='LambdaBucket'].OutputValue" \
+            --output text)
+          echo "lambda_bucket=$LAMBDA_BUCKET" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy Schema stack
+        env:
+          LAMBDA_BUCKET: ${{ steps.bucket.outputs.lambda_bucket }}
+        run: |
+          aws cloudformation deploy \
+            --stack-name "cloudmart-${ENVIRONMENT}-schema" \
+            --template-file cloudformation/schema-stack.yaml \
+            --parameter-overrides \
+              Environment="$ENVIRONMENT" \
+              LambdaS3Key="schema/schema-runner-${GITHUB_SHA}.zip" \
+              LambdaFunctionName="CloudMart-${ENVIRONMENT}-SchemaRunner" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION" \
+            --no-fail-on-empty-changeset
+
+      - name: Verify Schema Runner
+        run: |
+          aws lambda get-function \
+            --function-name "CloudMart-${ENVIRONMENT}-SchemaRunner" \
+            --region "$AWS_REGION" \
+            --query 'Configuration.[FunctionName,Runtime,Handler,State]' \
+            --output table
+
+      - name: Apply RDS schema
+        run: |
+          aws lambda invoke \
+            --function-name "CloudMart-${ENVIRONMENT}-SchemaRunner" \
+            --invocation-type RequestResponse \
+            --payload '{}' \
+            --cli-binary-format raw-in-base64-out \
+            schema-response.json \
+            --region "$AWS_REGION"
+
+          cat schema-response.json
+
+          grep -q '"statusCode": 200' schema-response.json
+          echo "RDS schema applied successfully."
+
+
+  # ============================================================
+  # 8. AUTHENTICATION
+  # ============================================================
+  auth:
+    name: Deploy Authentication Stack
+    needs: [schema, security, ssm, artifacts]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Authentication stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name "cloudmart-${ENVIRONMENT}-auth" \
+            --template-file cloudformation/Auth-stack.yaml \
+            --parameter-overrides \
+              Environment="$ENVIRONMENT" \
+              DbHostParameterName="/cloudmart/$ENVIRONMENT/db/host" \
+              DbPortParameterName="/cloudmart/$ENVIRONMENT/db/port" \
+              DbNameParameterName="/cloudmart/$ENVIRONMENT/db/name" \
+              DbUsernameParameterName="/cloudmart/$ENVIRONMENT/db/username" \
+              DbPasswordParameterName="/cloudmart/$ENVIRONMENT/db/password" \
+              LambdaS3Key="authorizer/authorizer-${GITHUB_SHA}.zip" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION" \
+            --no-fail-on-empty-changeset
+
+      - name: Verify Authorizer Lambda
+        run: |
+          aws lambda get-function \
+            --function-name "CloudMart-${ENVIRONMENT}-Authorizer" \
+            --region "$AWS_REGION" \
+            --query 'Configuration.[FunctionName,Runtime,Handler,State]' \
+            --output table
+
+
+  # ============================================================
+  # 9. API / APPLICATION + EVENT RESOURCES
+  # ============================================================
+  # The repository does not contain a separate Event stack or
+  # Application stack. api-stack.yaml owns API Gateway, Product,
+  # Order, Inventory Alert, EventBridge and SNS resources.
+  # ============================================================
+  api:
+    name: Deploy API Application Stack
+    needs: [auth, schema, security, ssm, artifacts]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy API stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name "cloudmart-${ENVIRONMENT}-api" \
+            --template-file cloudformation/api-stack.yaml \
+            --parameter-overrides \
+              Environment="$ENVIRONMENT" \
+              LambdaS3Key="product/product-${GITHUB_SHA}.zip" \
+              InventoryAlertLambdaS3Key="inventory-alert/inventory-alert-${GITHUB_SHA}.zip" \
+              LowStockEmail="/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
+              OrderLambdaS3Key="order/order-${GITHUB_SHA}.zip" \
+              OrderEmail="/cloudmart/$ENVIRONMENT/notifications/order-email" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION" \
+            --no-fail-on-empty-changeset
+
+      - name: Verify API stack
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-api" \
+            --region "$AWS_REGION" \
+            --query 'Stacks[0].StackStatus' \
+            --output text
+
+      - name: Verify API and Lambda resources
+        run: |
+          aws lambda get-function --function-name "CloudMart-${ENVIRONMENT}-ProductLambda" --region "$AWS_REGION" >/dev/null
+          aws lambda get-function --function-name "CloudMart-${ENVIRONMENT}-OrderLambda" --region "$AWS_REGION" >/dev/null
+          aws lambda get-function --function-name "CloudMart-${ENVIRONMENT}-InventoryAlertLambda" --region "$AWS_REGION" >/dev/null
+
+          aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-api" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
+            --output text
+
+
+  # ============================================================
+  # 10. REPORTING + DASHBOARD
+  # ============================================================
+  reporting:
+    name: Deploy Reporting and Dashboard
+    needs: api
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Get Data stack outputs
+        id: data
+        run: |
+          LAMBDA_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='LambdaBucket'].OutputValue" \
+            --output text)
+          REPORTS_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ReportsBucketName'].OutputValue" \
+            --output text)
+          echo "lambda_bucket=$LAMBDA_BUCKET" >> "$GITHUB_OUTPUT"
+          echo "reports_bucket=$REPORTS_BUCKET" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy Reporting stack
+        env:
+          LAMBDA_BUCKET: ${{ steps.data.outputs.lambda_bucket }}
+          REPORTS_BUCKET: ${{ steps.data.outputs.reports_bucket }}
+        run: |
+          aws cloudformation deploy \
+            --stack-name "cloudmart-${ENVIRONMENT}-reporting" \
+            --template-file cloudformation/Reporting-stack.yaml \
+            --parameter-overrides \
+              Environment="$ENVIRONMENT" \
+              LambdaS3Bucket="$LAMBDA_BUCKET" \
+              LambdaS3Key="report/report-${GITHUB_SHA}.zip" \
+              ReportsBucketName="$REPORTS_BUCKET" \
+              DashboardS3Bucket="$REPORTS_BUCKET" \
+              DashboardS3Prefix=cloudmart-dashboard \
+              DbHostParameterName="/cloudmart/$ENVIRONMENT/db/host" \
+              DbPortParameterName="/cloudmart/$ENVIRONMENT/db/port" \
+              DbNameParameterName="/cloudmart/$ENVIRONMENT/db/name" \
+              DbUsernameParameterName="/cloudmart/$ENVIRONMENT/db/username" \
+              DbPasswordParameterName="/cloudmart/$ENVIRONMENT/db/password" \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --region "$AWS_REGION" \
+            --no-fail-on-empty-changeset
+
+      - name: Verify dashboard EC2 and URL
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-reporting" \
+            --region "$AWS_REGION" \
+            --query 'Stacks[0].Outputs[?OutputKey==`DashboardURL` || OutputKey==`DashboardPublicIp` || OutputKey==`DashboardInstanceId`].[OutputKey,OutputValue]' \
+            --output table
+
+          INSTANCE_ID=$(aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-reporting" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='DashboardInstanceId'].OutputValue" \
+            --output text)
+
+          aws ec2 describe-instances \
+            --instance-ids "$INSTANCE_ID" \
+            --region "$AWS_REGION" \
+            --query 'Reservations[0].Instances[0].[InstanceId,State.Name,PublicIpAddress]' \
+            --output table
+
+      - name: Verify Reporting Lambda
+        run: |
+          aws lambda get-function \
+            --function-name "CloudMart-${ENVIRONMENT}-ReportGenerator" \
+            --region "$AWS_REGION" \
+            --query 'Configuration.[FunctionName,Runtime,Handler,State]' \
+            --output table
+
+
+  # ============================================================
+  # 11. MONITORING
+  # ============================================================
+  monitoring:
+    name: Deploy Monitoring Stack
+    needs: [api, reporting]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve monitoring email
+        id: email
+        env:
+          MONITORING_EMAIL_INPUT: ${{ inputs.monitoring_email }}
+        run: |
+          set -euo pipefail
+          PARAM="/cloudmart/$ENVIRONMENT/monitoring/email"
+
+          if [ -n "$MONITORING_EMAIL_INPUT" ]; then
+            echo "notification_email=$MONITORING_EMAIL_INPUT" >> "$GITHUB_OUTPUT"
+          elif aws ssm get-parameter --name "$PARAM" --region "$AWS_REGION" >/dev/null 2>&1; then
+            VALUE=$(aws ssm get-parameter --name "$PARAM" --region "$AWS_REGION" --query 'Parameter.Value' --output text)
+            test -n "$VALUE" && test "$VALUE" != None
+            echo "notification_email=$VALUE" >> "$GITHUB_OUTPUT"
+          else
+            echo "ERROR: monitoring_email input is required for a first deployment."
+            exit 1
+          fi
+
+      - name: Deploy Monitoring stack
+        env:
+          NOTIFICATION_EMAIL: ${{ steps.email.outputs.notification_email }}
+        run: |
+          aws cloudformation deploy \
+            --stack-name "cloudmart-${ENVIRONMENT}-monitoring" \
+            --template-file cloudformation/monitoring-stack.yaml \
+            --parameter-overrides \
+              Environment="$ENVIRONMENT" \
+              NotificationEmail="$NOTIFICATION_EMAIL" \
+            --region "$AWS_REGION" \
+            --no-fail-on-empty-changeset
+
+      - name: Verify monitoring resources
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-monitoring" \
+            --region "$AWS_REGION" \
+            --query 'Stacks[0].StackStatus' \
+            --output text
+
+          aws cloudwatch get-dashboard \
+            --dashboard-name cloudmart-operations \
+            --region "$AWS_REGION" >/dev/null
+
+          aws sns get-topic-attributes \
+            --topic-arn "$(aws cloudformation describe-stacks \
+              --stack-name "cloudmart-${ENVIRONMENT}-monitoring" \
+              --region "$AWS_REGION" \
+              --query "Stacks[0].Outputs[?OutputKey=='MonitoringSNSTopicArn'].OutputValue" \
+              --output text)" \
+            --region "$AWS_REGION" >/dev/null
+
+          echo "Monitoring dashboard and SNS topic verified."
+
+
+  # ============================================================
+  # 12. FINAL SMOKE TESTS
+  # ============================================================
+  verify:
+    name: Final CloudMart Verification
+    needs: [api, reporting, monitoring]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Verify all stack statuses
+        run: |
+          set -euo pipefail
+          for stack in \
+            network data security schema auth api reporting monitoring
+          do
+            NAME="cloudmart-${ENVIRONMENT}-$stack"
+            STATUS=$(aws cloudformation describe-stacks \
+              --stack-name "$NAME" \
+              --region "$AWS_REGION" \
+              --query 'Stacks[0].StackStatus' \
+              --output text)
+            echo "$NAME -> $STATUS"
+            case "$STATUS" in
+              CREATE_COMPLETE|UPDATE_COMPLETE) ;;
+              *) echo "ERROR: $NAME is not healthy."; exit 1 ;;
+            esac
+          done
+
+      - name: Dashboard smoke test
+        run: |
+          DASHBOARD_URL=$(aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-reporting" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='DashboardURL'].OutputValue" \
+            --output text)
+
+          echo "Dashboard URL: $DASHBOARD_URL"
+
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error --max-time 10 "$DASHBOARD_URL/health"; then
+              echo
+              echo "Dashboard smoke test passed."
+              break
+            fi
+            echo "Dashboard not ready; retry $attempt/12"
+            sleep 10
+            if [ "$attempt" -eq 12 ]; then
+              echo "ERROR: Dashboard health check failed."
+              exit 1
+            fi
+          done
+
+      - name: API smoke test
+        run: |
+          API_URL=$(aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-api" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
+            --output text)
+
+          echo "API URL: $API_URL"
+
+          HTTP_CODE=$(curl -sS -o /tmp/api-response.txt -w '%{http_code}' \
+            --max-time 20 "$API_URL/products")
+
+          echo "Unauthenticated /products HTTP status: $HTTP_CODE"
+          cat /tmp/api-response.txt || true
+
+          if [ "$HTTP_CODE" != "401" ] && [ "$HTTP_CODE" != "403" ]; then
+            echo "ERROR: Expected unauthenticated API request to be rejected."
+            exit 1
+          fi
+
+          echo "API authentication smoke test passed."
+
+      - name: Final outputs
+        run: |
+          echo "=================================================="
+          echo "CLOUDMART DEPLOYMENT COMPLETED SUCCESSFULLY"
+          echo "=================================================="
+
+          echo ""
+          echo "Dashboard:"
+          aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-reporting" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='DashboardURL'].OutputValue" \
+            --output text
+
+          echo ""
+          echo "API:"
+          aws cloudformation describe-stacks \
+            --stack-name "cloudmart-${ENVIRONMENT}-api" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
+            --output text
+
+          echo ""
+          echo "CloudWatch dashboard: cloudmart-operations"
+          echo "=================================================="
