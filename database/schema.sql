@@ -73,9 +73,11 @@ CREATE TABLE IF NOT EXISTS inventory (
         FOREIGN KEY (product_id)
         REFERENCES products(product_id)
         ON DELETE CASCADE
-        ON UPDATE CASCADE
-);
+        ON UPDATE CASCADE,
 
+    CONSTRAINT uq_inventory_product
+        UNIQUE (product_id)
+);
 
 -- =====================================================
 -- ORDERS TABLE
@@ -191,6 +193,41 @@ SET @index_exists = (
 SET @sql = IF(
     @index_exists = 0,
     'CREATE INDEX idx_inventory_product ON inventory(product_id)',
+    'SELECT 1'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- =====================================================
+-- REMOVE DUPLICATE INVENTORY ROWS
+-- =====================================================
+
+DELETE i1
+FROM inventory i1
+JOIN inventory i2
+    ON i1.product_id = i2.product_id
+   AND i1.inventory_id > i2.inventory_id;
+
+
+-- =====================================================
+-- INVENTORY PRODUCT UNIQUE CONSTRAINT
+-- =====================================================
+
+SET @constraint_exists = (
+    SELECT COUNT(*)
+    FROM information_schema.table_constraints
+    WHERE constraint_schema = DATABASE()
+      AND table_name = 'inventory'
+      AND constraint_name = 'uq_inventory_product'
+);
+
+SET @sql = IF(
+    @constraint_exists = 0,
+    'ALTER TABLE inventory
+     ADD CONSTRAINT uq_inventory_product UNIQUE (product_id)',
     'SELECT 1'
 );
 
@@ -617,6 +654,93 @@ VALUES
 ON DUPLICATE KEY UPDATE
     stock_count = VALUES(stock_count),
     low_stock_threshold = VALUES(low_stock_threshold);
+
+
+
+
+-- =====================================================
+-- RESET AUTO_INCREMENT VALUES
+-- Continue IDs from the CURRENT data
+-- =====================================================
+
+-- USERS
+SET @next_user_id = (
+    SELECT COALESCE(MAX(user_id), 0) + 1
+    FROM users
+);
+
+SET @sql = CONCAT(
+    'ALTER TABLE users AUTO_INCREMENT = ',
+    @next_user_id
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- PRODUCTS
+SET @next_product_id = (
+    SELECT COALESCE(MAX(product_id), 0) + 1
+    FROM products
+);
+
+SET @sql = CONCAT(
+    'ALTER TABLE products AUTO_INCREMENT = ',
+    @next_product_id
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- INVENTORY
+SET @next_inventory_id = (
+    SELECT COALESCE(MAX(inventory_id), 0) + 1
+    FROM inventory
+);
+
+SET @sql = CONCAT(
+    'ALTER TABLE inventory AUTO_INCREMENT = ',
+    @next_inventory_id
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- ORDERS
+SET @next_order_id = (
+    SELECT COALESCE(MAX(order_id), 0) + 1
+    FROM orders
+);
+
+SET @sql = CONCAT(
+    'ALTER TABLE orders AUTO_INCREMENT = ',
+    @next_order_id
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- ORDER ITEMS
+SET @next_order_item_id = (
+    SELECT COALESCE(MAX(order_item_id), 0) + 1
+    FROM order_items
+);
+
+SET @sql = CONCAT(
+    'ALTER TABLE order_items AUTO_INCREMENT = ',
+    @next_order_item_id
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 
 -- =====================================================
