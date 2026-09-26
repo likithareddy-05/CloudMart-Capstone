@@ -550,20 +550,7 @@ Resources:
                 $.detail.status
 
             InputTemplate: |
-              "
-              CloudMart
-              Order Confirmation
-              ────────────────────
-
-              Order ID: <orderId>
-              Customer Email: <customerEmail>
-              Status: <status>
-              Total Amount: <totalAmount>
-
-              Your order has been confirmed successfully.
-
-              Regards,
-              CloudMart Team"
+              '"CloudMart Order Confirmation\n\nOrder ID: <orderId>\nCustomer Email: <customerEmail>\nStatus: <status>\nTotal Amount: <totalAmount>\n\nYour order has been confirmed successfully.\n\nRegards,\nCloudMart Team"'
         - Id:
             OrderConfirmedLogTarget
 
@@ -633,21 +620,7 @@ Resources:
                 $.detail.reason
 
             InputTemplate: |
-              "
-              CloudMart
-              Order Failed
-              ────────────────────
-
-              Order ID: <orderId>
-              Customer ID: <customerId>
-              Status: <status>
-              Total Amount: <totalAmount>
-
-              Reason:
-              <reason>
-
-              Regards,
-              CloudMart Team"
+              '"CloudMart Order Failed\n\nOrder ID: <orderId>\nCustomer ID: <customerId>\nStatus: <status>\nTotal Amount: <totalAmount>\n\nReason:\n<reason>\n\nRegards,\nCloudMart Team"'
         - Id:
             OrderFailedLogTarget
 
@@ -717,22 +690,7 @@ Resources:
                 $.detail.status
 
             InputTemplate: |
-              "
-              CloudMart
-              Order Cancellation
-              ────────────────────
-
-              Order ID: <orderId>
-              Customer ID: <customerId>
-              Previous Status: <previousStatus>
-              Status: <status>
-              Total Amount: <totalAmount>
-
-              Your order has been cancelled successfully.
-              The inventory has been restored.
-
-              Regards,
-              CloudMart Team"
+              '"CloudMart Order Cancellation\n\nOrder ID: <orderId>\nCustomer ID: <customerId>\nPrevious Status: <previousStatus>\nStatus: <status>\nTotal Amount: <totalAmount>\n\nYour order has been cancelled successfully.\nThe inventory has been restored.\n\nRegards,\nCloudMart Team"'
         - Id:
             OrderCancelledLogTarget
 
