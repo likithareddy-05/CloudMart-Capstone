@@ -1297,7 +1297,7 @@ Resources:
   # API DEPLOYMENT
   # =======================================================
 
-  ApiDeployment:
+  ApiDeploymentV2:
 
     Type: AWS::ApiGateway::Deployment
 
