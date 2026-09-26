@@ -550,6 +550,7 @@ Resources:
                 $.detail.status
 
             InputTemplate: |
+              "
               CloudMart
               Order Confirmation
               ────────────────────
@@ -562,7 +563,7 @@ Resources:
               Your order has been confirmed successfully.
 
               Regards,
-              CloudMart Team
+              CloudMart Team"
         - Id:
             OrderConfirmedLogTarget
 
@@ -632,6 +633,7 @@ Resources:
                 $.detail.reason
 
             InputTemplate: |
+              "
               CloudMart
               Order Failed
               ────────────────────
@@ -645,7 +647,7 @@ Resources:
               <reason>
 
               Regards,
-              CloudMart Team
+              CloudMart Team"
         - Id:
             OrderFailedLogTarget
 
@@ -715,6 +717,7 @@ Resources:
                 $.detail.status
 
             InputTemplate: |
+              "
               CloudMart
               Order Cancellation
               ────────────────────
@@ -729,7 +732,7 @@ Resources:
               The inventory has been restored.
 
               Regards,
-              CloudMart Team
+              CloudMart Team"
         - Id:
             OrderCancelledLogTarget
 
