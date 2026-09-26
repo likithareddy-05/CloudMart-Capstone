@@ -1018,10 +1018,6 @@ Outputs:
       !GetAtt LowStockAlertsAlarm.Arn
 
 
-    Value:
-      !GetAtt OrderLambdaErrorsAlarm.Arn
-
-
   ReportGeneratorErrorsAlarmArn:
     Description:
       Report Generator Lambda errors CloudWatch alarm
