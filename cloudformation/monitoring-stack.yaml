@@ -223,16 +223,16 @@ Resources:
 
 
   # =======================================================
-  # INVENTORY ALERT ALARM
+  # LOW STOCK ALERT ALARM
   # =======================================================
 
-  InventoryAlertsAlarm:
+  LowStockAlertsAlarm:
     Type: AWS::CloudWatch::Alarm
 
     Properties:
 
       AlarmName:
-        !Sub CloudMart-${Environment}-InventoryAlerts
+        !Sub CloudMart-${Environment}-LowStockAlerts
 
       AlarmDescription:
         !Sub >
@@ -243,69 +243,7 @@ Resources:
         CloudMart
 
       MetricName:
-        InventoryAlerts
-
-      Statistic:
-        Sum
-
-      Period:
-        300
-
-      EvaluationPeriods:
-        1
-
-      DatapointsToAlarm:
-        1
-
-      Threshold:
-        1
-
-      ComparisonOperator:
-        GreaterThanOrEqualToThreshold
-
-      TreatMissingData:
-        notBreaching
-
-      AlarmActions:
-        - !Ref MonitoringSNSTopic
-
-      Tags:
-
-        - Key: Project
-          Value: CloudMart
-
-        - Key: Environment
-          Value: !Ref Environment
-
-
-  # =======================================================
-  # ORDER LAMBDA ERROR ALARM
-  # =======================================================
-
-  OrderLambdaErrorsAlarm:
-    Type: AWS::CloudWatch::Alarm
-
-    Properties:
-
-      AlarmName:
-        !Sub CloudMart-${Environment}-OrderLambdaErrors
-
-      AlarmDescription:
-        !Sub >
-          CloudMart ${Environment}: Order Lambda errors
-          detected.
-
-      Namespace:
-        AWS/Lambda
-
-      MetricName:
-        Errors
-
-      Dimensions:
-
-        - Name: FunctionName
-          Value:
-            !Sub CloudMart-${Environment}-OrderLambda
+        LowStockEvents
 
       Statistic:
         Sum
@@ -660,7 +598,7 @@ Resources:
                 "width": 12,
                 "height": 6,
                 "properties": {
-                  "title": "CloudMart Inventory",
+                  "title": "CloudMart Low Stock Alerts",
                   "view": "timeSeries",
                   "region": "${AWS::Region}",
                   "period": 300,
@@ -669,10 +607,6 @@ Resources:
                     [
                       "CloudMart",
                       "LowStockEvents"
-                    ],
-                    [
-                      ".",
-                      "InventoryAlerts"
                     ]
                   ]
                 }
@@ -714,7 +648,25 @@ Resources:
                       "AWS/Lambda",
                       "Errors",
                       "FunctionName",
+                      "CloudMart-${Environment}-ProductLambda"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
                       "CloudMart-${Environment}-OrderLambda"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-InventoryAlert"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-Authorizer"
                     ],
                     [
                       ".",
@@ -742,7 +694,25 @@ Resources:
                       "AWS/Lambda",
                       "Duration",
                       "FunctionName",
+                      "CloudMart-${Environment}-ProductLambda"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
                       "CloudMart-${Environment}-OrderLambda"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-InventoryAlert"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-Authorizer"
                     ],
                     [
                       ".",
@@ -885,6 +855,98 @@ Resources:
               },
               {
                 "type": "metric",
+                "x": 0,
+                "y": 30,
+                "width": 12,
+                "height": 6,
+                "properties": {
+                  "title": "Lambda Throttles",
+                  "view": "timeSeries",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "stat": "Sum",
+                  "metrics": [
+                    [
+                      "AWS/Lambda",
+                      "Throttles",
+                      "FunctionName",
+                      "CloudMart-${Environment}-ProductLambda"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-OrderLambda"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-InventoryAlert"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-Authorizer"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-ReportGenerator"
+                    ]
+                  ]
+                }
+              },
+              {
+                "type": "metric",
+                "x": 12,
+                "y": 30,
+                "width": 12,
+                "height": 6,
+                "properties": {
+                  "title": "Lambda Concurrent Executions",
+                  "view": "timeSeries",
+                  "region": "${AWS::Region}",
+                  "period": 300,
+                  "stat": "Maximum",
+                  "metrics": [
+                    [
+                      "AWS/Lambda",
+                      "ConcurrentExecutions",
+                      "FunctionName",
+                      "CloudMart-${Environment}-ProductLambda"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-OrderLambda"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-InventoryAlert"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-Authorizer"
+                    ],
+                    [
+                      ".",
+                      ".",
+                      ".",
+                      "CloudMart-${Environment}-ReportGenerator"
+                    ]
+                  ]
+                }
+              },
+              {
+                "type": "metric",
                 "x": 12,
                 "y": 24,
                 "width": 12,
@@ -948,17 +1010,13 @@ Outputs:
       !GetAtt OrdersCancelledAlarm.Arn
 
 
-  InventoryAlertsAlarmArn:
+  LowStockAlertsAlarmArn:
     Description:
-      Inventory alerts CloudWatch alarm
+      Low-stock alerts CloudWatch alarm
 
     Value:
-      !GetAtt InventoryAlertsAlarm.Arn
+      !GetAtt LowStockAlertsAlarm.Arn
 
-
-  OrderLambdaErrorsAlarmArn:
-    Description:
-      Order Lambda errors CloudWatch alarm
 
     Value:
       !GetAtt OrderLambdaErrorsAlarm.Arn
