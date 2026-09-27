@@ -40,7 +40,6 @@ Parameters:
 
   LowStockEmail:
     Type: AWS::SSM::Parameter::Value<String>
-    Default: /cloudmart/dev/notifications/low-stock-email
 
     Description: >
       SSM parameter containing the email address for CloudMart low-stock alerts.
@@ -72,7 +71,6 @@ Parameters:
 
   OrderEmail:
     Type: AWS::SSM::Parameter::Value<String>
-    Default: /cloudmart/dev/notifications/order-email
 
     Description: >
       SSM parameter containing the email address for CloudMart order notifications.
