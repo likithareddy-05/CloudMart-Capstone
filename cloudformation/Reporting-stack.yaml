@@ -62,31 +62,26 @@ Parameters:
 
   DbHostParameterName:
     Type: String
-    Default: /cloudmart/dev/db/host
     Description: SSM parameter containing the RDS MySQL host
 
 
   DbPortParameterName:
     Type: String
-    Default: /cloudmart/dev/db/port
     Description: SSM parameter containing the RDS MySQL port
 
 
   DbNameParameterName:
     Type: String
-    Default: /cloudmart/dev/db/name
     Description: SSM parameter containing the database name
 
 
   DbUsernameParameterName:
     Type: String
-    Default: /cloudmart/dev/db/username
     Description: SSM parameter containing the database username
 
 
   DbPasswordParameterName:
     Type: String
-    Default: /cloudmart/dev/db/password
     Description: SSM SecureString parameter containing the database password
 
 

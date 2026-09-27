@@ -32,7 +32,6 @@ Parameters:
   DbHostParameterName:
     Type: String
 
-    Default: /cloudmart/dev/db/host
 
     Description: >
       SSM Parameter Store path containing
@@ -42,7 +41,6 @@ Parameters:
   DbPortParameterName:
     Type: String
 
-    Default: /cloudmart/dev/db/port
 
     Description: >
       SSM Parameter Store path containing
@@ -52,7 +50,6 @@ Parameters:
   DbNameParameterName:
     Type: String
 
-    Default: /cloudmart/dev/db/name
 
     Description: >
       SSM Parameter Store path containing
@@ -62,7 +59,6 @@ Parameters:
   DbUsernameParameterName:
     Type: String
 
-    Default: /cloudmart/dev/db/username
 
     Description: >
       SSM Parameter Store path containing
@@ -72,7 +68,6 @@ Parameters:
   DbPasswordParameterName:
     Type: String
 
-    Default: /cloudmart/dev/db/password
 
     Description: >
       SSM SecureString parameter containing
