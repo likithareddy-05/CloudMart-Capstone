@@ -138,14 +138,14 @@ def load_session_secret():
         )
 
 
-    # Development fallback.
-    # In the deployed EC2 environment the file is created
-    # by the CloudFormation UserData.
-    return os.getenv(
-        "FLASK_SECRET_KEY",
-        "cloudmart-development-secret-change-me"
-    )
+    secret = os.getenv("FLASK_SECRET_KEY")
 
+    if secret:
+        return secret
+
+    raise RuntimeError(
+        "Flask session secret is not configured."
+    )
 
 app.secret_key = load_session_secret()
 
