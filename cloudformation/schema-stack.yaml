@@ -31,7 +31,7 @@ Parameters:
 
   LambdaFunctionName:
     Type: String
-    Default: CloudMart-dev-SchemaRunner
+    Default: Name of the Schema Runner Lambda function
 
 
 # =========================================================
