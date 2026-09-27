@@ -1082,7 +1082,7 @@ jobs:
       - name: Verify CloudWatch dashboard
         run: |
           aws cloudwatch get-dashboard \
-            --dashboard-name "cloudmart-operations" \
+            --dashboard-name "cloudmart-${ENVIRONMENT}-operations" \
             --region "$AWS_REGION" \
             --query '{DashboardName:DashboardName}' \
             --output table

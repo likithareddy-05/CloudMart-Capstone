@@ -557,7 +557,7 @@ Resources:
     Properties:
 
       DashboardName:
-        !Sub cloudmart-operations
+        !Sub cloudmart-${Environment}-operations
 
       DashboardBody:
         !Sub |
