@@ -127,7 +127,8 @@ Resources:
                 Action:
                   - events:PutEvents
 
-                Resource: - !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/CloudMart-${Environment}-EventBus
+                Resource: 
+                  - !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/CloudMart-${Environment}-EventBus
 
 
   # =======================================================
@@ -205,7 +206,8 @@ Resources:
                 Action:
                   - events:PutEvents
 
-                Resource: - !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/CloudMart-${Environment}-EventBus
+                Resource: 
+                  - !Sub arn:${AWS::Partition}:events:${AWS::Region}:${AWS::AccountId}:event-bus/CloudMart-${Environment}-EventBus
 
               # -------------------------------------------
               # Publish notifications
@@ -218,7 +220,8 @@ Resources:
                 Action:
                   - sns:Publish
 
-                Resource: - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:CloudMart-${Environment}-OrderTopic
+                Resource: 
+                  - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:CloudMart-${Environment}-OrderTopic
 
 
               - Sid: PublishCustomMetrics
@@ -316,7 +319,8 @@ Resources:
                 Action:
                   - sns:Publish
 
-                Resource: - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:CloudMart-${Environment}-LowStockTopic
+                Resource: 
+                  - !Sub arn:${AWS::Partition}:sns:${AWS::Region}:${AWS::AccountId}:CloudMart-${Environment}-LowStockTopic
 
 
               - Sid: PublishCustomMetrics
