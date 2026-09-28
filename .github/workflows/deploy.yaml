@@ -2,19 +2,6 @@ name: Deploy CloudMart - Full Stack
 
 on:
   workflow_dispatch:
-    inputs:
-      order_email:
-        description: "Required only when order-email SSM parameter is missing"
-        required: false
-        type: string
-      low_stock_email:
-        description: "Required only when low-stock-email SSM parameter is missing"
-        required: false
-        type: string
-      monitoring_email:
-        description: "Required only when monitoring-email SSM parameter is missing"
-        required: false
-        type: string
 
 permissions:
   id-token: write
@@ -118,14 +105,21 @@ jobs:
 
 
   # =========================================================
-  # 2. SSM
+  # 2. SSM - PRE-DATA PARAMETERS ONLY
   # =========================================================
   #
-  # Creates the DB password before the Data stack.
+  # Created before Data because Data needs db/password when
+  # creating the RDS master password.
   #
-  # Notification email parameters are NOT created here.
-  # They are owned by the API and Monitoring CloudFormation
-  # stacks respectively.
+  # Notification email values are stored persistently in SSM.
+  # This workflow only verifies the existing values and reuses them;
+  # they are NOT requested as workflow inputs on every deployment.
+  #
+  # Data stack itself creates:
+  #   /cloudmart/dev/db/host
+  #   /cloudmart/dev/db/port
+  #   /cloudmart/dev/db/name
+  #   /cloudmart/dev/db/username
   #
   # =========================================================
   ssm:
@@ -134,16 +128,12 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # -----------------------------------------------------
-      # DB PASSWORD
-      # -----------------------------------------------------
       - name: Create DB password SecureString
         env:
           DB_PASSWORD: ${{ secrets.CLOUDMART_DB_PASSWORD }}
@@ -164,20 +154,45 @@ jobs:
 
           echo "DB password SecureString created/updated."
 
-      # -----------------------------------------------------
-      # VERIFY DB PASSWORD
-      # -----------------------------------------------------
-      - name: Verify DB password parameter
+      - name: Verify existing Order Email parameter
         run: |
           set -euo pipefail
 
           aws ssm get-parameter \
-            --name "/cloudmart/$ENVIRONMENT/db/password" \
+            --name "/cloudmart/$ENVIRONMENT/notifications/order-email" \
             --region "$AWS_REGION" \
             --query 'Parameter.{Name:Name,Type:Type}' \
             --output table
 
-          echo "DB password SSM parameter verified."
+          echo "Order email parameter already exists. Keeping the stored value."
+
+      - name: Verify existing Low Stock Email parameter
+        run: |
+          set -euo pipefail
+
+          aws ssm get-parameter \
+            --name "/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
+            --region "$AWS_REGION" \
+            --query 'Parameter.{Name:Name,Type:Type}' \
+            --output table
+
+          echo "Low-stock email parameter already exists. Keeping the stored value."
+
+      - name: Verify pre-Data SSM parameters
+        run: |
+          set -euo pipefail
+
+          for name in \
+            "/cloudmart/$ENVIRONMENT/db/password" \
+            "/cloudmart/$ENVIRONMENT/notifications/order-email" \
+            "/cloudmart/$ENVIRONMENT/notifications/low-stock-email"
+          do
+            aws ssm get-parameter \
+              --name "$name" \
+              --region "$AWS_REGION" \
+              --query 'Parameter.{Name:Name,Type:Type}' \
+              --output table
+          done
 
 
   # =========================================================
@@ -679,40 +694,6 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Resolve notification emails
-        run: |
-          set -euo pipefail
-
-          ORDER_PARAM="/cloudmart/$ENVIRONMENT/notifications/order-email"
-          LOW_STOCK_PARAM="/cloudmart/$ENVIRONMENT/notifications/low-stock-email"
-
-          if aws ssm get-parameter --name "$ORDER_PARAM" --region "$AWS_REGION" >/dev/null 2>&1; then
-            ORDER_EMAIL=$(aws ssm get-parameter               --name "$ORDER_PARAM"               --region "$AWS_REGION"               --query 'Parameter.Value'               --output text)
-            echo "Order email already exists in SSM. Reusing the stored value."
-          else
-            ORDER_EMAIL="${{ inputs.order_email }}"
-            if [ -z "$ORDER_EMAIL" ]; then
-              echo "ERROR: order_email input is required because $ORDER_PARAM does not exist."
-              exit 1
-            fi
-            echo "Order email SSM parameter is missing. Using workflow input."
-          fi
-
-          if aws ssm get-parameter --name "$LOW_STOCK_PARAM" --region "$AWS_REGION" >/dev/null 2>&1; then
-            LOW_STOCK_EMAIL=$(aws ssm get-parameter               --name "$LOW_STOCK_PARAM"               --region "$AWS_REGION"               --query 'Parameter.Value'               --output text)
-            echo "Low-stock email already exists in SSM. Reusing the stored value."
-          else
-            LOW_STOCK_EMAIL="${{ inputs.low_stock_email }}"
-            if [ -z "$LOW_STOCK_EMAIL" ]; then
-              echo "ERROR: low_stock_email input is required because $LOW_STOCK_PARAM does not exist."
-              exit 1
-            fi
-            echo "Low-stock email SSM parameter is missing. Using workflow input."
-          fi
-
-          echo "ORDER_EMAIL=$ORDER_EMAIL" >> "$GITHUB_ENV"
-          echo "LOW_STOCK_EMAIL=$LOW_STOCK_EMAIL" >> "$GITHUB_ENV"
-
       - name: Deploy API stack
         run: |
           set -euo pipefail
@@ -724,9 +705,9 @@ jobs:
               Environment="$ENVIRONMENT" \
               LambdaS3Key="product/product-${GITHUB_SHA}.zip" \
               InventoryAlertLambdaS3Key="inventory-alert/inventory-alert-${GITHUB_SHA}.zip" \
-              LowStockEmail="$LOW_STOCK_EMAIL" \
+              LowStockEmail="/cloudmart/$ENVIRONMENT/notifications/low-stock-email" \
               OrderLambdaS3Key="order/order-${GITHUB_SHA}.zip" \
-              OrderEmail="$ORDER_EMAIL" \
+              OrderEmail="/cloudmart/$ENVIRONMENT/notifications/order-email" \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --region "$AWS_REGION"
@@ -910,24 +891,23 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Resolve monitoring email
+      - name: Read existing Monitoring Email parameter
         run: |
           set -euo pipefail
 
-          MONITORING_PARAM="/cloudmart/$ENVIRONMENT/monitoring/email"
+          MONITORING_EMAIL=$(aws ssm get-parameter \
+            --name "/cloudmart/$ENVIRONMENT/monitoring/email" \
+            --region "$AWS_REGION" \
+            --query 'Parameter.Value' \
+            --output text)
 
-          if aws ssm get-parameter --name "$MONITORING_PARAM" --region "$AWS_REGION" >/dev/null 2>&1; then
-            MONITORING_EMAIL=$(aws ssm get-parameter               --name "$MONITORING_PARAM"               --region "$AWS_REGION"               --query 'Parameter.Value'               --output text)
-            echo "Monitoring email already exists in SSM. Reusing the stored value."
-          else
-            MONITORING_EMAIL="${{ inputs.monitoring_email }}"
-            if [ -z "$MONITORING_EMAIL" ]; then
-              echo "ERROR: monitoring_email input is required because $MONITORING_PARAM does not exist."
-              exit 1
-            fi
-            echo "Monitoring email SSM parameter is missing. Using workflow input."
+          if [ -z "$MONITORING_EMAIL" ] || [ "$MONITORING_EMAIL" = "None" ]; then
+            echo "ERROR: /cloudmart/$ENVIRONMENT/monitoring/email does not exist or is empty."
+            echo "The monitoring email must be configured once in SSM before deployment."
+            exit 1
           fi
 
+          echo "Monitoring email parameter found. Reusing the stored value."
           echo "MONITORING_EMAIL=$MONITORING_EMAIL" >> "$GITHUB_ENV"
 
       - name: Deploy Monitoring stack
@@ -950,8 +930,7 @@ jobs:
   # =========================================================
   # No API/dashboard health tests are performed here.
   # This stage checks stack/resource existence and configuration.
-  # Notification email parameters are created by their owning stacks and
-  # reused automatically on later deployments.
+  # Notification emails are persisted in SSM and reused across deployments.
   # =========================================================
   verify:
     name: 11 - Final Verification
