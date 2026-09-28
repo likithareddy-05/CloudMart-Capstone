@@ -229,7 +229,7 @@ Resources:
                 Action:
                   - cloudwatch:PutMetricData
                 Resource: '*'
-
+#doesn't support resource-level restriction in the same way many resource-based actions do, so "*" is used here.
 
   # =======================================================
   # 3. INVENTORY ALERT LAMBDA ROLE
