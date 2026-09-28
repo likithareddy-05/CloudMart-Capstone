@@ -118,29 +118,14 @@ jobs:
 
 
   # =========================================================
-  # 2. SSM - PRE-DATA PARAMETERS ONLY
+  # 2. SSM
   # =========================================================
   #
-  # Created before Data because Data needs db/password when
-  # creating the RDS master password.
+  # Creates the DB password before the Data stack.
   #
-  # Only the DB password is created before Data because the Data stack
-  # needs it while creating the RDS master password.
-  #
-  # Notification email parameters are owned by the stacks that use them:
-  #   API stack   -> order-email, low-stock-email
-  #   Monitoring  -> monitoring/email
-  #
-  # First deployment / missing parameter:
-  #   workflow asks for the email input.
-  # Later deployments:
-  #   existing SSM value is reused automatically; no email input is required.
-  #
-  # Data stack itself creates:
-  #   /cloudmart/dev/db/host
-  #   /cloudmart/dev/db/port
-  #   /cloudmart/dev/db/name
-  #   /cloudmart/dev/db/username
+  # Notification email parameters are NOT created here.
+  # They are owned by the API and Monitoring CloudFormation
+  # stacks respectively.
   #
   # =========================================================
   ssm:
@@ -149,12 +134,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      # -----------------------------------------------------
+      # DB PASSWORD
+      # -----------------------------------------------------
       - name: Create DB password SecureString
         env:
           DB_PASSWORD: ${{ secrets.CLOUDMART_DB_PASSWORD }}
@@ -175,7 +164,10 @@ jobs:
 
           echo "DB password SecureString created/updated."
 
-      - name: Verify pre-Data SSM parameters
+      # -----------------------------------------------------
+      # VERIFY DB PASSWORD
+      # -----------------------------------------------------
+      - name: Verify DB password parameter
         run: |
           set -euo pipefail
 
@@ -185,6 +177,7 @@ jobs:
             --query 'Parameter.{Name:Name,Type:Type}' \
             --output table
 
+          echo "DB password SSM parameter verified."
 
 
   # =========================================================
