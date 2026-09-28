@@ -991,7 +991,7 @@ Outputs:
       CloudMart operations CloudWatch dashboard
 
     Value:
-      !Sub cloudmart-operations
+      !Sub cloudmart-${Environment}-operations
 
 
   OrdersFailedAlarmArn:

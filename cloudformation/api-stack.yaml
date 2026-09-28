@@ -39,10 +39,11 @@ Parameters:
 
 
   LowStockEmail:
-    Type: AWS::SSM::Parameter::Value<String>
+    Type: String
+    NoEcho: true
 
     Description: >
-      SSM parameter containing the email address for CloudMart low-stock alerts.
+      Email address for CloudMart low-stock alerts.
 
 
   # =======================================================
@@ -70,10 +71,11 @@ Parameters:
 
 
   OrderEmail:
-    Type: AWS::SSM::Parameter::Value<String>
+    Type: String
+    NoEcho: true
 
     Description: >
-      SSM parameter containing the email address for CloudMart order notifications.
+      Email address for CloudMart order notifications.
 
 
 # =========================================================
@@ -81,6 +83,37 @@ Parameters:
 # =========================================================
 
 Resources:
+
+  OrderEmailParameter:
+    Type: AWS::SSM::Parameter
+
+    Properties:
+      Name:
+        !Sub /cloudmart/${Environment}/notifications/order-email
+
+      Type: String
+
+      Value:
+        !Ref OrderEmail
+
+      Description:
+        !Sub CloudMart ${Environment} order notification email
+
+
+  LowStockEmailParameter:
+    Type: AWS::SSM::Parameter
+
+    Properties:
+      Name:
+        !Sub /cloudmart/${Environment}/notifications/low-stock-email
+
+      Type: String
+
+      Value:
+        !Ref LowStockEmail
+
+      Description:
+        !Sub CloudMart ${Environment} low-stock notification email
 
 
   # =======================================================
