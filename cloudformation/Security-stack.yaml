@@ -229,6 +229,9 @@ Resources:
                 Action:
                   - cloudwatch:PutMetricData
                 Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: CloudMart
 #doesn't support resource-level restriction in the same way many resource-based actions do, so "*" is used here.
 
   # =======================================================
@@ -328,6 +331,9 @@ Resources:
                 Action:
                   - cloudwatch:PutMetricData
                 Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: CloudMart
 
 
   # =======================================================
@@ -434,6 +440,9 @@ Resources:
                   - cloudwatch:PutMetricData
 
                 Resource: '*'
+                Condition:
+                  StringEquals:
+                    cloudwatch:namespace: CloudMart
 
   # =======================================================
   # 5. EC2 DASHBOARD IAM ROLE
