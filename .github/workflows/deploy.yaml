@@ -844,6 +844,60 @@ jobs:
             --query 'Configuration.{Name:FunctionName,Runtime:Runtime,Handler:Handler,State:State}' \
             --output table
 
+
+      - name: Generate initial report
+        run: |
+          set -euo pipefail
+
+          echo "Generating initial CloudMart report..."
+
+          aws lambda invoke \
+            --function-name "CloudMart-${ENVIRONMENT}-ReportGenerator" \
+            --invocation-type RequestResponse \
+            --payload '{}' \
+            --cli-binary-format raw-in-base64-out \
+            initial-report-response.json \
+            --region "$AWS_REGION"
+
+          echo "Report Generator response:"
+          cat initial-report-response.json
+
+          grep -q '"statusCode": 200' initial-report-response.json
+
+          echo "Initial report generated successfully."
+
+      - name: Verify initial report exists in S3
+        run: |
+          set -euo pipefail
+
+          REPORTS_BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name "$DATA_STACK" \
+            --region "$AWS_REGION" \
+            --query "Stacks[0].Outputs[?OutputKey=='ReportsBucketName'].OutputValue" \
+            --output text)
+
+          if [ -z "$REPORTS_BUCKET" ] || [ "$REPORTS_BUCKET" = "None" ]; then
+            echo "ERROR: ReportsBucketName output not found."
+            exit 1
+          fi
+
+          echo "Checking for generated report in s3://${REPORTS_BUCKET}/reports/"
+
+          REPORT_COUNT=$(aws s3api list-objects-v2 \
+            --bucket "$REPORTS_BUCKET" \
+            --prefix "reports/" \
+            --query "Contents[?ends_with(Key, '.csv')] | length(@)" \
+            --output text \
+            --region "$AWS_REGION")
+
+          if [ "$REPORT_COUNT" -lt 1 ]; then
+            echo "ERROR: No report was generated."
+            exit 1
+          fi
+
+          echo "Initial report verified successfully."
+          echo "CSV reports available: $REPORT_COUNT"
+
       - name: Display Reporting outputs
         run: |
           aws cloudformation describe-stacks \
