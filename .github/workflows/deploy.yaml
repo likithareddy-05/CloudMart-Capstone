@@ -9,7 +9,7 @@ permissions:
 
 env:
   AWS_REGION: ap-south-1
-  ENVIRONMENT: dev
+  ENVIRONMENT: prod
 
   NETWORK_STACK: cloudmart-dev-network
   DATA_STACK: cloudmart-dev-data
