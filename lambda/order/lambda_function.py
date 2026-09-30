@@ -37,10 +37,7 @@ def log_error(event_name, error, **kwargs):
 # ENVIRONMENT VARIABLES
 # =========================================================
 
-ENVIRONMENT = os.environ.get(
-    "ENVIRONMENT",
-    "dev"
-)
+ENVIRONMENT = os.environ["ENVIRONMENT"]
 
 EVENT_BUS_NAME = os.environ.get(
     "EVENT_BUS_NAME"

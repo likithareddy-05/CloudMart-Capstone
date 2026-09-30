@@ -15,14 +15,9 @@ Parameters:
 
   Environment:
     Type: String
-    Default: dev
-
-    AllowedValues:
-      - dev
-      - test
-      - prod
-
+    AllowedPattern: '^[a-z0-9-]+$'
     Description: Deployment environment
+
 
   DashboardS3Bucket:
     Type: String
@@ -34,16 +29,6 @@ Parameters:
     Description: S3 prefix containing app.py, index.html and login.html
 
 
-# =========================================================
-# CONDITIONS
-# =========================================================
-
-Conditions:
-
-  IsProd:
-    !Equals
-      - !Ref Environment
-      - prod
 
 
 # =========================================================

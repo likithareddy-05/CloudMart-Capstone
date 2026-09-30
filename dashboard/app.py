@@ -46,10 +46,7 @@ app = Flask(
 # ENVIRONMENT
 # ============================================================
 
-ENVIRONMENT = os.getenv(
-    "ENVIRONMENT",
-    "dev"
-).lower()
+ENVIRONMENT = os.environ["ENVIRONMENT"].lower()
 
 
 # ============================================================
@@ -61,40 +58,22 @@ AWS_REGION = os.getenv(
     "ap-south-1"
 )
 
-REPORTS_BUCKET = os.getenv(
-    "REPORTS_BUCKET",
-    "cloudmart-dev-reports-430155298316"
-)
+REPORTS_BUCKET = os.environ["REPORTS_BUCKET"]
 
 
 # ============================================================
 # SSM PARAMETER NAMES
 # ============================================================
 
-DB_HOST_PARAMETER = os.getenv(
-    "DB_HOST_PARAMETER",
-    "/cloudmart/dev/db/host"
-)
+DB_HOST_PARAMETER = os.environ["DB_HOST_PARAMETER"]
 
-DB_PORT_PARAMETER = os.getenv(
-    "DB_PORT_PARAMETER",
-    "/cloudmart/dev/db/port"
-)
+DB_PORT_PARAMETER = os.environ["DB_PORT_PARAMETER"]
 
-DB_NAME_PARAMETER = os.getenv(
-    "DB_NAME_PARAMETER",
-    "/cloudmart/dev/db/name"
-)
+DB_NAME_PARAMETER = os.environ["DB_NAME_PARAMETER"]
 
-DB_USERNAME_PARAMETER = os.getenv(
-    "DB_USERNAME_PARAMETER",
-    "/cloudmart/dev/db/username"
-)
+DB_USERNAME_PARAMETER = os.environ["DB_USERNAME_PARAMETER"]
 
-DB_PASSWORD_PARAMETER = os.getenv(
-    "DB_PASSWORD_PARAMETER",
-    "/cloudmart/dev/db/password"
-)
+DB_PASSWORD_PARAMETER = os.environ["DB_PASSWORD_PARAMETER"]
 
 
 # ============================================================

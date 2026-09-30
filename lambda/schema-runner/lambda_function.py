@@ -61,10 +61,7 @@ def get_parameter(name):
 
 def get_database_credentials():
 
-    environment = os.environ.get(
-        "ENVIRONMENT",
-        "dev"
-    )
+    environment = os.environ["ENVIRONMENT"]
 
     prefix = f"/cloudmart/{environment}/db"
 
@@ -176,10 +173,7 @@ def lambda_handler(event, context):
         json.dumps(
             {
                 "event": "schema_deployment_started",
-                "environment": os.environ.get(
-                    "ENVIRONMENT",
-                    "dev"
-                )
+                "environment": os.environ["ENVIRONMENT"]
             }
         )
     )
@@ -246,10 +240,7 @@ def lambda_handler(event, context):
         log_error(
             "schema_deployment_failed",
             error,
-            environment=os.environ.get(
-                "ENVIRONMENT",
-                "dev"
-            )
+            environment=os.environ["ENVIRONMENT"]
         )
 
         if connection:

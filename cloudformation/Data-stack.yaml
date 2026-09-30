@@ -11,12 +11,8 @@ Parameters:
 
   Environment:
     Type: String
-    Default: dev
-
-    AllowedValues:
-      - dev
-      - test
-      - prod
+    AllowedPattern: '^[a-z0-9-]+$'
+    Description: Deployment environment
 
 
   # -------------------------------------------------------

@@ -84,10 +84,7 @@ def get_parameter(name):
 
 def get_database_credentials():
 
-    environment = os.environ.get(
-        "ENVIRONMENT",
-        "dev"
-    )
+    environment = os.environ["ENVIRONMENT"]
 
     prefix = f"/cloudmart/{environment}/db"
 
