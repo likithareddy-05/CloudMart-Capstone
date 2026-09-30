@@ -11,14 +11,6 @@ env:
   AWS_REGION: ap-south-1
   ENVIRONMENT: prod
 
-  NETWORK_STACK: cloudmart-dev-network
-  DATA_STACK: cloudmart-dev-data
-  SECURITY_STACK: cloudmart-dev-security
-  SCHEMA_STACK: cloudmart-dev-schema
-  AUTH_STACK: cloudmart-dev-auth
-  API_STACK: cloudmart-dev-api
-  REPORTING_STACK: cloudmart-dev-reporting
-  MONITORING_STACK: cloudmart-dev-monitoring
 
   DASHBOARD_S3_PREFIX: cloudmart-dashboard
   DB_NAME: cloudmart
@@ -76,7 +68,7 @@ jobs:
           set -euo pipefail
 
           aws cloudformation deploy \
-            --stack-name "$NETWORK_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-network" \
             --template-file cloudformation/Network-stack.yaml \
             --parameter-overrides Environment="$ENVIRONMENT" \
             --capabilities CAPABILITY_NAMED_IAM \
@@ -88,7 +80,7 @@ jobs:
           set -euo pipefail
 
           STATUS=$(aws cloudformation describe-stacks \
-            --stack-name "$NETWORK_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-network" \
             --region "$AWS_REGION" \
             --query 'Stacks[0].StackStatus' \
             --output text)
@@ -118,12 +110,12 @@ jobs:
   # to the Data stack. Data stack creates their SSM parameters.
   #
   # Data stack creates:
-  #   /cloudmart/dev/db/host
-  #   /cloudmart/dev/db/port
-  #   /cloudmart/dev/db/name
-  #   /cloudmart/dev/db/username
-  #   /cloudmart/dev/notifications/order-email
-  #   /cloudmart/dev/notifications/low-stock-email
+  #   /cloudmart/<environment>/db/host
+  #   /cloudmart/<environment>/db/port
+  #   /cloudmart/<environment>/db/name
+  #   /cloudmart/<environment>/db/username
+  #   /cloudmart/<environment>/notifications/order-email
+  #   /cloudmart/<environment>/notifications/low-stock-email
   #
   # =========================================================
   ssm:
@@ -194,7 +186,7 @@ jobs:
           set -euo pipefail
 
           aws cloudformation deploy \
-            --stack-name "$DATA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
             --template-file cloudformation/Data-stack.yaml \
             --parameter-overrides \
               Environment="$ENVIRONMENT" \
@@ -211,7 +203,7 @@ jobs:
           set -euo pipefail
 
           STATUS=$(aws cloudformation describe-stacks \
-            --stack-name "$DATA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
             --region "$AWS_REGION" \
             --query 'Stacks[0].StackStatus' \
             --output text)
@@ -248,7 +240,7 @@ jobs:
       - name: Display Data outputs
         run: |
           aws cloudformation describe-stacks \
-            --stack-name "$DATA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
             --region "$AWS_REGION" \
             --query 'Stacks[0].Outputs' \
             --output table
@@ -278,7 +270,7 @@ jobs:
           set -euo pipefail
 
           REPORTS_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name "$DATA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
             --region "$AWS_REGION" \
             --query "Stacks[0].Outputs[?OutputKey=='ReportsBucketName'].OutputValue" \
             --output text)
@@ -295,7 +287,7 @@ jobs:
           set -euo pipefail
 
           aws cloudformation deploy \
-            --stack-name "$SECURITY_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-security" \
             --template-file cloudformation/Security-stack.yaml \
             --parameter-overrides \
               Environment="$ENVIRONMENT" \
@@ -310,7 +302,7 @@ jobs:
           set -euo pipefail
 
           STATUS=$(aws cloudformation describe-stacks \
-            --stack-name "$SECURITY_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-security" \
             --region "$AWS_REGION" \
             --query 'Stacks[0].StackStatus' \
             --output text)
@@ -352,13 +344,13 @@ jobs:
           set -euo pipefail
 
           LAMBDA_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name "$DATA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
             --region "$AWS_REGION" \
             --query "Stacks[0].Outputs[?OutputKey=='LambdaBucket'].OutputValue" \
             --output text)
 
           REPORTS_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name "$DATA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
             --region "$AWS_REGION" \
             --query "Stacks[0].Outputs[?OutputKey=='ReportsBucketName'].OutputValue" \
             --output text)
@@ -530,7 +522,7 @@ jobs:
           set -euo pipefail
 
           aws cloudformation deploy \
-            --stack-name "$SCHEMA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-schema" \
             --template-file cloudformation/schema-stack.yaml \
             --parameter-overrides \
               Environment="$ENVIRONMENT" \
@@ -545,7 +537,7 @@ jobs:
           set -euo pipefail
 
           STATUS=$(aws cloudformation describe-stacks \
-            --stack-name "$SCHEMA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-schema" \
             --region "$AWS_REGION" \
             --query 'Stacks[0].StackStatus' \
             --output text)
@@ -610,7 +602,7 @@ jobs:
           set -euo pipefail
 
           aws cloudformation deploy \
-            --stack-name "$AUTH_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-auth" \
             --template-file cloudformation/Auth-stack.yaml \
             --parameter-overrides \
               Environment="$ENVIRONMENT" \
@@ -629,7 +621,7 @@ jobs:
           set -euo pipefail
 
           STATUS=$(aws cloudformation describe-stacks \
-            --stack-name "$AUTH_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-auth" \
             --region "$AWS_REGION" \
             --query 'Stacks[0].StackStatus' \
             --output text)
@@ -679,7 +671,7 @@ jobs:
           set -euo pipefail
 
           aws cloudformation deploy \
-            --stack-name "$API_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-api" \
             --template-file cloudformation/api-stack.yaml \
             --parameter-overrides \
               Environment="$ENVIRONMENT" \
@@ -697,7 +689,7 @@ jobs:
           set -euo pipefail
 
           STATUS=$(aws cloudformation describe-stacks \
-            --stack-name "$API_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-api" \
             --region "$AWS_REGION" \
             --query 'Stacks[0].StackStatus' \
             --output text)
@@ -739,7 +731,7 @@ jobs:
       - name: Display API outputs
         run: |
           aws cloudformation describe-stacks \
-            --stack-name "$API_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-api" \
             --region "$AWS_REGION" \
             --query 'Stacks[0].Outputs' \
             --output table
@@ -769,13 +761,13 @@ jobs:
           set -euo pipefail
 
           LAMBDA_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name "$DATA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
             --region "$AWS_REGION" \
             --query "Stacks[0].Outputs[?OutputKey=='LambdaBucket'].OutputValue" \
             --output text)
 
           REPORTS_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name "$DATA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
             --region "$AWS_REGION" \
             --query "Stacks[0].Outputs[?OutputKey=='ReportsBucketName'].OutputValue" \
             --output text)
@@ -798,7 +790,7 @@ jobs:
           set -euo pipefail
 
           aws cloudformation deploy \
-            --stack-name "$REPORTING_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-reporting" \
             --template-file cloudformation/Reporting-stack.yaml \
             --parameter-overrides \
               Environment="$ENVIRONMENT" \
@@ -821,7 +813,7 @@ jobs:
           set -euo pipefail
 
           STATUS=$(aws cloudformation describe-stacks \
-            --stack-name "$REPORTING_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-reporting" \
             --region "$AWS_REGION" \
             --query 'Stacks[0].StackStatus' \
             --output text)
@@ -871,7 +863,7 @@ jobs:
           set -euo pipefail
 
           REPORTS_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name "$DATA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
             --region "$AWS_REGION" \
             --query "Stacks[0].Outputs[?OutputKey=='ReportsBucketName'].OutputValue" \
             --output text)
@@ -901,7 +893,7 @@ jobs:
       - name: Display Reporting outputs
         run: |
           aws cloudformation describe-stacks \
-            --stack-name "$REPORTING_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-reporting" \
             --region "$AWS_REGION" \
             --query 'Stacks[0].Outputs' \
             --output table
@@ -950,7 +942,7 @@ jobs:
           fi
 
           aws cloudformation deploy \
-            --stack-name "$MONITORING_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-monitoring" \
             --template-file cloudformation/monitoring-stack.yaml \
             --parameter-overrides \
               Environment="$ENVIRONMENT" \
@@ -985,14 +977,14 @@ jobs:
           set -euo pipefail
 
           for stack in \
-            "$NETWORK_STACK" \
-            "$DATA_STACK" \
-            "$SECURITY_STACK" \
-            "$SCHEMA_STACK" \
-            "$AUTH_STACK" \
-            "$API_STACK" \
-            "$REPORTING_STACK" \
-            "$MONITORING_STACK"
+            "cloudmart-${ENVIRONMENT}-network" \
+            "cloudmart-${ENVIRONMENT}-data" \
+            "cloudmart-${ENVIRONMENT}-security" \
+            "cloudmart-${ENVIRONMENT}-schema" \
+            "cloudmart-${ENVIRONMENT}-auth" \
+            "cloudmart-${ENVIRONMENT}-api" \
+            "cloudmart-${ENVIRONMENT}-reporting" \
+            "cloudmart-${ENVIRONMENT}-monitoring"
           do
             STATUS=$(aws cloudformation describe-stacks \
               --stack-name "$stack" \
@@ -1061,13 +1053,13 @@ jobs:
           set -euo pipefail
 
           LAMBDA_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name "$DATA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
             --region "$AWS_REGION" \
             --query "Stacks[0].Outputs[?OutputKey=='LambdaBucket'].OutputValue" \
             --output text)
 
           REPORTS_BUCKET=$(aws cloudformation describe-stacks \
-            --stack-name "$DATA_STACK" \
+            --stack-name "cloudmart-${ENVIRONMENT}-data" \
             --region "$AWS_REGION" \
             --query "Stacks[0].Outputs[?OutputKey=='ReportsBucketName'].OutputValue" \
             --output text)
@@ -1126,9 +1118,9 @@ jobs:
       - name: Display final stack outputs
         run: |
           for stack in \
-            "$API_STACK" \
-            "$REPORTING_STACK" \
-            "$MONITORING_STACK"
+            "cloudmart-${ENVIRONMENT}-api" \
+            "cloudmart-${ENVIRONMENT}-reporting" \
+            "cloudmart-${ENVIRONMENT}-monitoring"
           do
             echo "========================================"
             echo "$stack"
