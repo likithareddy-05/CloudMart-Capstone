@@ -9,7 +9,7 @@ permissions:
 
 env:
   AWS_REGION: ap-south-1
-  ENVIRONMENT: prod
+  ENVIRONMENT: dev
 
 
   DASHBOARD_S3_PREFIX: cloudmart-dashboard
