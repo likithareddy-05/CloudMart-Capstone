@@ -196,7 +196,8 @@ def create_policy(
 # =========================================================
 # CREATE API ARN BASE
 # =========================================================
-
+#methodArn tells your Authorizer:
+#"This is the exact API request the user is currently trying to make."
 def get_api_arn_base(method_arn):
 
     arn_parts = method_arn.split("/")

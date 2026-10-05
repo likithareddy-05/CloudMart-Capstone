@@ -304,7 +304,7 @@ Resources:
   # =======================================================
   # API GATEWAY PERMISSION
   # =======================================================
-
+#Allow API Gateway to invoke my Authorizer Lambda.
   AuthorizerInvokePermission:
 
     Type: AWS::Lambda::Permission
