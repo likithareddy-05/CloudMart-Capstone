@@ -2,9 +2,9 @@ CloudMart – E-Commerce Backend Platform
 
 1. Project Overview
 
-CloudMart is a cloud-based e-commerce backend platform designed to manage products, inventory, customer orders, authentication, notifications, reporting, and operational monitoring.
+CloudMart is a cloud-based e-commerce backend platform built using AWS managed services. It provides product and inventory management, user authentication, order processing, event-driven processing, notifications, scheduled reporting, an EC2-based Flask administration dashboard, and centralized monitoring.
 
-The application is built using AWS managed services and follows an Infrastructure as Code approach using AWS CloudFormation. The infrastructure is deployed through GitHub Actions using GitHub OIDC authentication.
+The project uses AWS CloudFormation for Infrastructure as Code and GitHub Actions with GitHub OIDC for automated deployment.
 
 Main Capabilities
 
@@ -12,15 +12,17 @@ Product management
 
 Inventory management
 
-Customer and administrator authentication
+User and administrator authentication
 
-Order creation and order retrieval
+Order creation and retrieval
 
 Order cancellation
 
-Inventory updates based on orders
+Inventory updates during order processing
 
 Event-driven order processing
+
+Failed-order persistence
 
 Low-stock notifications
 
@@ -28,99 +30,144 @@ Order confirmation, failure, and cancellation notifications
 
 Daily report generation
 
-EC2-based administration dashboard
+S3-based report storage
+
+EC2 Flask administration dashboard
 
 CloudWatch monitoring and alarms
 
 SNS-based operational notifications
 
-Automated CI/CD deployment using GitHub Actions and CloudFormation
+Automated CI/CD deployment
 
-2. High-Level Architecture
+Environment-based AWS resource configuration
 
-CloudMart uses a VPC-based AWS architecture with public and private components.
+2. Architecture Overview
 
-Application Flow
+The final CloudMart architecture consists of a CI/CD layer, API and authentication layer, application Lambda functions, RDS MySQL, EventBridge, SNS, reporting, monitoring, and an EC2 administration dashboard.
 
-                         ┌──────────────────┐
-                         │      Client      │
-                         └────────┬─────────┘
-                                  │
-                                  ▼
-                         ┌──────────────────┐
-                         │   API Gateway    │
-                         └────────┬─────────┘
-                                  │
-                         ┌────────▼─────────┐
-                         │ Lambda Authorizer│
-                         └────────┬─────────┘
-                                  │
-                     ┌────────────┴────────────┐
-                     │                         │
-                     ▼                         ▼
-           ┌─────────────────┐        ┌─────────────────┐
-           │ Product Lambda  │        │  Order Lambda   │
-           └────────┬────────┘        └────────┬────────┘
-                    │                          │
-                    └────────────┬─────────────┘
-                                 ▼
-                         ┌─────────────────┐
-                         │   RDS MySQL     │
-                         └─────────────────┘
+The architecture is organized around the following major flows:
 
-Event-Driven Flow
+Developer
+    |
+    v
+GitHub
+    |
+    v
+GitHub Actions
+    |
+    v
+CloudFormation
+    |
+    v
+AWS Infrastructure
+
+The application request flow is:
+
+Client
+  |
+  v
+API Gateway
+  |
+  v
+Authorizer Lambda
+  |
+  +-----------------------------+
+  |                             |
+  v                             v
+Valid User                 Invalid User
+  |                             |
+  v                             v
+Allow Request              HTTP 401
+  |                        Unauthorized
+  |
+  +----------------------+----------------------+
+  |                                             |
+  v                                             v
+Product / Inventory Lambda                Order Lambda
+  |                                             |
+  +----------------------+----------------------+
+                         |
+                         v
+                    RDS MySQL
+
+Order processing produces order events:
 
 Order Lambda
-     │
-     ▼
-EventBridge Event Bus
-     │
-     ├──────────────► Order Notification ──► SNS ──► Email
-     │
-     └──────────────► Inventory Alert Lambda
-                                      │
-                                      ▼
-                                     SNS
-                                      │
-                                      ▼
-                                     Email
+     |
+     v
+Order Confirmed / Failed / Cancelled
+     |
+     v
+CloudMart EventBridge Event Bus
 
-Reporting Flow
+EventBridge then routes events to the required processing components:
 
-EventBridge Scheduled Rule
-          │
-          ▼
-Report Generator Lambda
-          │
-          ├──────────► RDS MySQL
-          │
-          ▼
-       CSV Report
-          │
-          ▼
-       S3 Reports
-          │
-          ▼
-      EC2 Dashboard
+CloudMart EventBridge Event Bus
+        |
+        +----> Order Failed Handler
+        |          |
+        |          v
+        |       RDS MySQL
+        |       Failed-order persistence
+        |
+        +----> Inventory Alert Lambda
+        |          |
+        |          v
+        |         SNS
+        |
+        +----> EventBridge Scheduled Rule
+                   |
+                   v
+             Report Generator Lambda
+                   |
+                   v
+                S3 Reports
+                   |
+                   v
+             EC2 Flask Dashboard
 
-Monitoring Flow
+Operational monitoring follows:
 
-AWS Resources
-      │
-      ▼
-CloudWatch Metrics
-      │
-      ├────────► CloudWatch Dashboard
-      │
-      └────────► CloudWatch Alarms
-                       │
-                       ▼
-                      SNS
-                       │
-                       ▼
-                     Email
+CloudWatch Alarms
+       |
+       v
+      SNS
+       |
+       v
+Operations Team
 
-3. AWS Services Used
+3. CI/CD Architecture
+
+CloudMart uses GitHub Actions and AWS CloudFormation for deployment.
+
+Developer
+    |
+    v
+GitHub Repository
+    |
+    v
+GitHub Actions
+    |
+    v
+GitHub OIDC
+    |
+    v
+AWS IAM Deployment Role
+    |
+    v
+CloudFormation
+    |
+    v
+AWS Infrastructure
+
+GitHub Actions authenticates to AWS using OIDC, avoiding the need for long-lived AWS access keys.
+
+The deployment workflow validates CloudFormation templates and deploys the CloudMart infrastructure through the required CloudFormation stacks.
+
+The project uses environment-based naming, with the current environment being dev.
+
+4. AWS Services Used
 
 AWS Service
 
@@ -130,96 +177,137 @@ Amazon VPC
 
 Provides isolated network infrastructure
 
-Amazon EC2
+Amazon API Gateway
 
-Hosts the Flask administration dashboard
-
-Amazon RDS for MySQL
-
-Stores application data
+Exposes CloudMart HTTP APIs
 
 AWS Lambda
 
-Implements application, authentication, inventory, reporting, and schema functionality
+Runs application, authentication, inventory-alert, reporting, and database functions
 
-Amazon API Gateway
+Amazon RDS for MySQL
 
-Exposes application APIs
+Stores users/authentication, products, inventory, and orders
 
 Amazon EventBridge
 
-Provides event-driven integration and scheduled execution
+Provides event-driven processing and scheduled report execution
 
 Amazon SNS
 
-Sends notifications and alarm emails
+Sends application and operational notifications
 
 Amazon S3
 
 Stores Lambda artifacts, reports, and dashboard files
 
+Amazon EC2
+
+Hosts the Flask administration dashboard
+
 Amazon CloudWatch
 
-Provides monitoring, metrics, dashboards, and alarms
+Provides logs, metrics, dashboards, and alarms
 
 AWS Systems Manager Parameter Store
 
-Stores application configuration and database parameters
+Stores application and database configuration
 
 AWS IAM
 
-Controls permissions and access
+Controls AWS permissions
 
 AWS CloudFormation
 
-Provisions and manages infrastructure
+Provides Infrastructure as Code
 
 GitHub Actions
 
-Provides CI/CD automation
+Automates deployment
 
 GitHub OIDC
 
-Allows GitHub Actions to authenticate with AWS without long-lived AWS access keys
+Provides secure GitHub-to-AWS authentication
 
-4. VPC and Networking
+5. VPC and Networking
 
-CloudMart uses a VPC with CIDR:
+CloudMart uses a VPC-based architecture.
+
+The main VPC CIDR is:
 
 10.0.0.0/16
 
 Network Layout
 
-CloudMart VPC
-10.0.0.0/16
-│
-├── Public Subnet
-│   └── EC2 Flask Dashboard
-│
-├── Private Subnet
-│   └── Lambda Functions
-│
-└── RDS Support Private Subnet
-    └── RDS MySQL
+                         VPC
+                    10.0.0.0/16
+                         |
+              +----------+----------+
+              |                     |
+           Public                 Private
+              |                     |
+       EC2 Dashboard        +--------+--------+
+                             |        |        |
+                            RDS   Order Lambda  |
+                                   Inventory    |
+                                   Alert Lambda |
+                                   Product      |
+                                   Lambda       |
+                                   Auth Lambda  |
 
-Main Network Addresses
+Main Subnets
 
-VPC:              10.0.0.0/16
-Public Subnet:    10.0.1.0/24
-Private Subnet:   10.0.2.0/24
-RDS Subnet:       10.0.3.0/24
+Public Subnet:        10.0.1.0/24
+Private Subnet:       10.0.2.0/24
+RDS Support Subnet:   10.0.3.0/24
 
-The EC2 dashboard is placed in the public subnet, while the application Lambda functions and RDS database are kept in private networking.
+The architecture places the EC2 Flask Dashboard in the public subnet.
 
-Security Groups control communication between the application components.
+The private side contains:
+
+RDS MySQL
+
+Order Lambda
+
+Inventory Alert Lambda
+
+Product/Inventory Lambda
+
+Authorizer Lambda
 
 The RDS database is not directly exposed to the public internet.
 
-5. Database
+VPC Endpoints
 
-CloudMart uses Amazon RDS for MySQL as its relational database.
+The private application components use VPC endpoints for required AWS service connectivity.
 
-The database contains the following main tables:
+Configured endpoints include:
+
+Amazon S3 Gateway Endpoint
+
+SSM Interface Endpoint
+
+CloudWatch Logs Interface Endpoint
+
+CloudWatch monitoring interface connectivity
+
+EventBridge Interface Endpoint
+
+This design provides private connectivity to AWS services without requiring a NAT Gateway for the project architecture.
+
+Security Groups
+
+Security groups control communication between the application components.
+
+The RDS security group permits MySQL traffic only from the required application security group rather than from the public internet.
+
+6. Database
+
+CloudMart uses Amazon RDS for MySQL.
+
+The architecture shows RDS MySQL as the central relational data store for authentication and application data.
+
+The main tables are:
 
 USERS
 PRODUCTS
@@ -229,16 +317,22 @@ ORDER_ITEMS
 
 USERS
 
-Stores customer and administrator information.
+Stores user and authentication information.
 
 Important fields include:
 
 user_id
+
 name
+
 email
+
 role
+
 token_hash
+
 created_at
+
 updated_at
 
 PRODUCTS
@@ -248,12 +342,19 @@ Stores product catalog information.
 Important fields include:
 
 product_id
+
 name
+
 description
+
 price
+
 category
+
 is_deleted
+
 created_at
+
 updated_at
 
 INVENTORY
@@ -263,12 +364,14 @@ Stores stock information for products.
 Important fields include:
 
 inventory_id
-product_id
-stock_count
-low_stock_threshold
-updated_at
 
-Each product has a corresponding inventory record.
+product_id
+
+stock_count
+
+low_stock_threshold
+
+updated_at
 
 ORDERS
 
@@ -277,107 +380,214 @@ Stores customer order information.
 Important fields include:
 
 order_id
+
 customer_id
+
 total_amount
+
 status
+
 failure_reason
+
 created_at
+
 updated_at
 
 ORDER_ITEMS
 
-Stores the products included in each order.
+Stores products included in each order.
 
 Important fields include:
 
 order_item_id
+
 order_id
+
 product_id
+
 quantity
+
 unit_price
+
 subtotal
 
 Database Relationships
 
 USERS
-  │
-  │ 1
-  │
-  └──────────< ORDERS
-                  │
-                  │ 1
-                  │
-                  └──────────< ORDER_ITEMS >────────── PRODUCTS
-                                                        │
-                                                        │ 1
-                                                        │
-                                                        └──── INVENTORY
+  |
+  +------< ORDERS
+              |
+              +------< ORDER_ITEMS >------ PRODUCTS
+                                            |
+                                            +------ INVENTORY
 
-Foreign key relationships maintain referential integrity between related records.
+Foreign-key relationships maintain relationships between the database entities.
 
-6. Lambda Functions
+7. API and Authentication Flow
 
-CloudMart uses multiple Lambda functions for different responsibilities.
+The CloudMart architecture uses:
 
-Product Lambda
+Client
+  |
+  v
+API Gateway
+  |
+  v
+Authorizer Lambda
+  |
+  v
+RDS MySQL
+Users/Auth
 
-Responsible for product operations:
+The Authorizer Lambda validates the requesting user against the authentication information stored in RDS.
 
-Get all products
+Authentication Decision
 
-Get a product by ID
+                 Authorizer Lambda
+                        |
+                 Validate User
+                        |
+             +----------+----------+
+             |                     |
+             v                     v
+        Valid User            Invalid User
+             |                     |
+             v                     v
+       Allow Request           HTTP 401
+                               Unauthorized
 
-Create a product
+Only an authenticated request proceeds to the application Lambda functions.
 
-Update a product
+Token Validation
 
-Delete a product
+The application stores token information securely using a hash.
 
-Product write operations are protected using the custom Lambda authorizer.
+The authorization process is:
+
+Bearer Token
+     |
+     v
+SHA-256 Hash
+     |
+     v
+Compare with token_hash
+stored in RDS
+     |
+     v
+Identify User + Role
+     |
+     v
+Allow / Deny
+
+The raw token is not stored as plain text.
+
+Role-Based Authorization
+
+CloudMart distinguishes between application users and administrators.
+
+The authenticated role is used when determining whether an API request should be allowed.
+
+Administrative product operations are protected from unauthorized users.
+
+8. Application Lambda Functions
+
+CloudMart uses multiple Lambda functions for separate responsibilities.
+
+Product / Inventory Lambda
+
+The architecture represents product and inventory operations through the Product/Inventory Lambda component.
+
+Responsibilities include:
+
+Product retrieval
+
+Product creation
+
+Product update
+
+Product deletion
+
+Inventory-related application operations
+
+Protected write operations require successful authorization.
 
 Order Lambda
 
-Responsible for order operations:
+The Order Lambda is responsible for:
 
-Create orders
+Creating orders
 
-Retrieve orders
+Retrieving orders
 
-Retrieve customer-specific orders
+Retrieving customer-specific orders
 
-Cancel orders
+Retrieving an order by ID
 
-Order cancellation is implemented using PATCH so that the order record is retained rather than deleted.
+Cancelling orders
 
-The order process also updates inventory and publishes relevant events.
+Updating inventory during order processing
+
+Publishing order events
+
+The order process produces:
+
+Order Confirmed
+Order Failed
+Order Cancelled
+
+These events are sent to the CloudMart EventBridge Event Bus.
 
 Inventory Alert Lambda
 
-Receives inventory-related events from EventBridge and publishes low-stock notifications through SNS.
+The Inventory Alert Lambda receives inventory-related events from EventBridge.
+
+It is responsible for processing low-stock conditions and sending the appropriate notification through SNS.
 
 Authorizer Lambda
 
-Authenticates requests using the application's authentication data stored in the database and determines whether the request should be allowed.
+The Authorizer Lambda:
+
+Receives the authorization information from API Gateway.
+
+Extracts the bearer token.
+
+Hashes the token.
+
+Checks the authentication information in RDS.
+
+Determines the user's role.
+
+Allows or denies the request.
+
+Invalid authentication results in:
+
+HTTP 401 Unauthorized
 
 Report Generator Lambda
 
-Runs on the scheduled EventBridge rule and:
+The Report Generator Lambda runs from the EventBridge scheduled rule.
 
-Retrieves required data from RDS.
+It:
 
-Generates the daily report.
+Retrieves required database configuration.
 
-Creates a CSV file.
+Connects to RDS MySQL.
 
-Uploads the report to the Reports S3 bucket.
+Retrieves report data.
 
-Publishes the report generation metric.
+Generates a CSV report.
 
-7. API
+Uploads the report to S3.
 
-API Gateway provides HTTP endpoints for the application.
+Publishes the report-generation metric.
 
-Main Resources
+Schema Runner Lambda
+
+The Schema Runner Lambda is used during deployment to apply the CloudMart database schema.
+
+9. API Endpoints
+
+The main API resources are:
 
 /products
 /products/{id}
@@ -385,152 +595,279 @@ Main Resources
 /orders
 /orders/{id}
 
-Product API
+Product Operations
 
-Product retrieval operations are available through GET endpoints.
+GET     /products
+GET     /products/{id}
+POST    /products
+PUT     /products/{id}
+DELETE  /products/{id}
 
-Product creation, update, and deletion operations use authentication through the custom Lambda authorizer.
+Order Operations
 
-Order API
+POST    /orders
+GET     /orders
+GET     /orders/{id}
+PATCH   /orders/{id}
 
-Orders support:
+Order cancellation uses PATCH so that the order record remains available for historical purposes instead of physically deleting the record.
 
-Creating an order
+10. Order Processing
 
-Getting orders
+The Order Lambda performs the order workflow.
 
-Getting customer-specific orders
-
-Cancelling an order
-
-Order cancellation uses PATCH rather than deleting the order so that the order history is retained.
-
-8. Authentication and Authorization
-
-CloudMart uses a custom Lambda authorizer.
-
-The high-level request flow is:
+A simplified successful order flow is:
 
 Client
-   │
-   ▼
+  |
+  v
 API Gateway
-   │
-   ▼
-Lambda Authorizer
-   │
-   ├── Authentication successful
-   │          │
-   │          ▼
-   │     Application Lambda
-   │
-   └── Authentication failed
-              │
-              ▼
-            Denied
+  |
+  v
+Authorizer Lambda
+  |
+  v
+Order Lambda
+  |
+  +----> Validate / process order
+  |
+  +----> Update inventory
+  |
+  +----> Persist order in RDS
+  |
+  v
+Order Confirmed Event
+  |
+  v
+EventBridge
 
-The application distinguishes between user and administrator roles.
+If order processing fails:
 
-Administrative dashboard access is also authenticated before dashboard functionality is provided.
+Order Lambda
+     |
+     v
+Order Failed Event
+     |
+     v
+EventBridge
+     |
+     v
+Order Failed Handler
+     |
+     v
+RDS MySQL
+Failed-order failure persisted
 
-9. Event-Driven Architecture
+For cancellation:
 
-CloudMart uses Amazon EventBridge for event-driven integration.
+Order Lambda
+     |
+     v
+Update order status
+     |
+     v
+Restore relevant inventory
+     |
+     v
+Order Cancelled Event
+     |
+     v
+EventBridge
 
-The application publishes events for important order and inventory operations.
+11. Event-Driven Architecture
 
-Examples include:
+CloudMart uses Amazon EventBridge as the central event bus.
 
-Order confirmed
+The architecture specifically contains:
 
-Order failed
+CloudMart EventBridge Event Bus
 
-Order cancelled
+Important order events include:
 
-Low-stock events
+Order Confirmed
 
-Report generation events
+Order Failed
 
-EventBridge rules process these events and route them to the appropriate targets.
+Order Cancelled
 
-For notification events, SNS is used to deliver email notifications.
+The EventBridge bus routes events to the required targets.
 
-10. Notifications
+Order Failed Handler
 
-Amazon SNS is used for application and operational notifications.
+The Order Failed Handler receives the failed-order event and persists the relevant failed-order/failure information in RDS MySQL.
 
-Order Confirmation
+Order Failed
+     |
+     v
+EventBridge
+     |
+     v
+Order Failed Handler
+     |
+     v
+RDS MySQL
+Failed-order failure persisted
 
-A successful order generates an order confirmation notification.
+Inventory Alert
 
-Order Failure
+Inventory-related events are routed to:
 
-A failed order generates a notification containing information such as the order ID, customer ID, status, total amount, and failure reason.
+EventBridge
+     |
+     v
+Inventory Alert Lambda
+     |
+     v
+SNS
 
-Order Cancellation
+This separates event generation from notification processing.
 
-A cancelled order generates a cancellation notification.
+12. Notifications
 
-Low Stock
+Amazon SNS is used for notification delivery.
 
-When inventory reaches the configured low-stock condition, an inventory alert event is processed and an SNS notification is sent.
+The architecture routes notification processing to SNS, which then delivers messages to the configured email recipients.
 
-CloudWatch Alarms
+Order Notifications
 
-CloudWatch alarms also send notifications through SNS when configured thresholds are breached.
+The application supports notifications for:
 
-11. Reporting
+Order confirmation
+
+Order failure
+
+Order cancellation
+
+Low-Stock Notifications
+
+When an inventory event meets the low-stock condition:
+
+Inventory Event
+      |
+      v
+EventBridge
+      |
+      v
+Inventory Alert Lambda
+      |
+      v
+SNS
+      |
+      v
+Email
+
+Operational Alerts
+
+CloudWatch alarms use SNS for operational notifications:
+
+CloudWatch Alarm
+      |
+      v
+SNS
+      |
+      v
+Operations Team
+
+13. Reporting
 
 CloudMart generates a daily report using an EventBridge scheduled rule.
 
-The report schedule is:
+Reporting Flow
+
+EventBridge Scheduled Rule
+          |
+          v
+Report Generator Lambda
+          |
+          v
+RDS MySQL
+          |
+          v
+CSV Report
+          |
+          v
+S3 Reports
+          |
+          v
+EC2 Flask Dashboard
+
+The report generator retrieves required information from RDS and creates a CSV report.
+
+Reports are stored under:
+
+reports/
+
+Report Schedule
+
+The configured schedule is:
 
 03:00 UTC
 08:30 IST
 
-The flow is:
+The EC2 dashboard provides access to generated reports.
 
-EventBridge Schedule
-        ↓
-Report Generator Lambda
-        ↓
-RDS MySQL
-        ↓
-CSV Report
-        ↓
-S3 Reports Bucket
+14. EC2 Flask Administration Dashboard
 
-Reports are stored using the reports prefix:
-
-reports/
-
-The administration dashboard retrieves available reports from the S3 Reports bucket.
-
-12. Administration Dashboard
-
-The CloudMart dashboard is hosted on Amazon EC2.
+The administration dashboard is hosted on Amazon EC2.
 
 The dashboard uses:
 
 Flask
-Gunicorn
-Nginx
-Amazon RDS
-Amazon S3
 
-Request Flow
+Gunicorn
+
+Nginx
+
+RDS MySQL
+
+S3
+
+SSM Parameter Store
+
+Dashboard Request Flow
 
 Browser
-   ↓
+   |
+   v
 Nginx
-   ↓
+   |
+   v
 Gunicorn
-   ↓
+   |
+   v
 Flask
-   ├── RDS MySQL
-   └── S3 Reports
+   |
+   +------> RDS MySQL
+   |
+   +------> S3 Reports
+   |
+   +------> SSM Parameter Store
 
-Nginx acts as the reverse proxy, Gunicorn runs the Flask application, and Flask handles dashboard requests and database/report operations.
+Nginx
+
+Nginx acts as the reverse proxy.
+
+Gunicorn
+
+Gunicorn runs the Flask application.
+
+Flask
+
+Flask handles:
+
+Dashboard routes
+
+Administrator authentication
+
+Session management
+
+Database queries
+
+Report listing
+
+Report download operations
+
+Dashboard Information
 
 The dashboard provides operational information such as:
 
@@ -550,15 +887,37 @@ Total Revenue
 
 Inventory
 
-It also provides access to application tables and generated reports.
+Generated Reports
 
-13. Monitoring
+15. Dashboard Authentication
 
-CloudMart uses Amazon CloudWatch for application and infrastructure monitoring.
+The EC2 dashboard requires administrator authentication before protected dashboard functionality is available.
 
-Lambda Metrics
+The Flask application uses a session mechanism to maintain the authenticated state.
 
-The monitoring dashboard includes:
+The dashboard session:
+
+Uses a generated/configured secret stored on the EC2 instance.
+
+Does not hard-code the secret in app.py.
+
+Uses protected session-cookie settings.
+
+Uses a 60-minute inactivity timeout.
+
+The session secret is stored on the EC2 instance at:
+
+/etc/cloudmart-dashboard-secret
+
+16. Monitoring
+
+CloudMart uses Amazon CloudWatch for monitoring.
+
+Monitoring covers both AWS service metrics and CloudMart application metrics.
+
+Lambda Monitoring
+
+Standard Lambda metrics include:
 
 Invocations
 
@@ -570,7 +929,7 @@ Throttles
 
 Concurrent Executions
 
-The monitored Lambda functions include:
+The monitored application functions include:
 
 Product Lambda
 
@@ -582,43 +941,59 @@ Authorizer Lambda
 
 Report Generator Lambda
 
-API Gateway Metrics
+API Gateway Monitoring
 
-The dashboard monitors:
+The monitoring dashboard includes:
 
-API Gateway Count
+API request count
 
-API Gateway 4XX Errors
+API Gateway 4XX errors
 
-API Gateway 5XX Errors
+API Gateway 5XX errors
 
-RDS Metrics
+RDS Monitoring
 
-The dashboard monitors:
+The monitoring dashboard includes:
 
-CPU Utilization
+CPU utilization
 
-Database Connections
+Database connections
 
-Free Storage Space
+Free storage space
 
-Custom Application Metrics
+17. Custom CloudWatch Metrics
 
-CloudMart also publishes application-specific metrics for events such as:
+CloudMart publishes application-specific metrics to CloudWatch.
 
-Orders Created
+Important metrics include:
 
-Orders Failed
+OrdersFailed
+OrdersCancelled
+InventoryAlerts
+ReportsGenerated
+LowStockEvents
 
-Orders Cancelled
+These metrics provide business/application-level visibility in addition to standard AWS service metrics.
 
-Inventory Alerts
+Example
 
-Reports Generated
+When an order is cancelled:
 
-These metrics provide application-level visibility in addition to standard AWS service metrics.
+Order Cancellation
+       |
+       v
+Order Lambda
+       |
+       +----> OrdersCancelled metric
+       |
+       +----> OrderCancelled event
+                    |
+                    v
+               EventBridge
 
-14. CloudWatch Alarms
+Similarly, report generation publishes the report-generation metric.
+
+18. CloudWatch Alarms
 
 CloudWatch alarms are configured for important operational conditions.
 
@@ -628,84 +1003,36 @@ Order failures
 
 Order cancellations
 
-Low-stock/inventory alerts
+Inventory/low-stock alerts
 
-Report generator errors
+Report Generator Lambda errors
 
-Lambda error rate
+Lambda error conditions
 
 API Gateway errors
 
 RDS CPU utilization
 
-The notification flow is:
+Alarm Flow
 
+CloudWatch Metric
+       |
+       v
 CloudWatch Alarm
-       ↓
-SNS Topic
-       ↓
-Email Notification
+       |
+       v
+SNS
+       |
+       v
+Operations Team
 
-This allows operational issues to be detected without continuously checking the CloudWatch dashboard.
+The purpose of the alarms is to notify the operations team when configured thresholds are breached.
 
-15. CI/CD Pipeline
+19. AWS Systems Manager Parameter Store
 
-CloudMart uses GitHub Actions for deployment automation.
+CloudMart uses SSM Parameter Store for environment-specific configuration.
 
-The high-level flow is:
-
-Developer
-    ↓
-GitHub Repository
-    ↓
-GitHub Actions
-    ↓
-GitHub OIDC
-    ↓
-AWS IAM Deployment Role
-    ↓
-AWS CloudFormation
-    ↓
-AWS Infrastructure
-
-GitHub Actions authenticates with AWS using OIDC instead of storing long-lived AWS access keys.
-
-GitHub Secrets
-
-The workflow uses the following GitHub repository secrets:
-
-AWS_ROLE_ARN
-CLOUDMART_DB_PASSWORD
-CLOUDMART_ORDER_EMAIL
-CLOUDMART_LOW_STOCK_EMAIL
-CLOUDMART_MONITORING_EMAIL
-
-Secret Purposes
-
-AWS_ROLE_ARN
-IAM role assumed by GitHub Actions.
-
-CLOUDMART_DB_PASSWORD
-Database master password used during RDS deployment.
-
-CLOUDMART_ORDER_EMAIL
-Email address used for order notifications.
-
-CLOUDMART_LOW_STOCK_EMAIL
-Email address used for low-stock notifications.
-
-CLOUDMART_MONITORING_EMAIL
-Email address used for CloudWatch monitoring notifications.
-
-Actual secret values must never be committed to the repository or documented in source code.
-
-The database password is written to AWS Systems Manager Parameter Store as a SecureString before the Data stack is deployed.
-
-16. AWS Systems Manager Parameter Store
-
-CloudMart uses AWS Systems Manager Parameter Store for application configuration and database connection information.
-
-The environment-specific parameter paths are:
+The main parameter paths are:
 
 /cloudmart/<environment>/db/password
 /cloudmart/<environment>/db/host
@@ -718,7 +1045,7 @@ The environment-specific parameter paths are:
 
 /cloudmart/<environment>/monitoring/email
 
-For the current dev environment:
+For the current development environment:
 
 /cloudmart/dev/db/password
 /cloudmart/dev/db/host
@@ -731,72 +1058,253 @@ For the current dev environment:
 
 /cloudmart/dev/monitoring/email
 
-Parameter Creation Flow
+Parameter Creation
 
-The database password is created by the GitHub Actions workflow before the Data stack is deployed because the RDS resource requires the password during database creation.
+The database password is created before the Data stack is deployed because RDS requires the password during database creation.
 
-The Data stack creates the following parameters after RDS is provisioned:
+The Data stack then creates the database connection parameters after RDS is provisioned.
 
-/cloudmart/<environment>/db/host
-/cloudmart/<environment>/db/port
-/cloudmart/<environment>/db/name
-/cloudmart/<environment>/db/username
+The notification parameters are also created for the application components.
 
-The Data stack also creates:
+The monitoring stack creates the monitoring email parameter.
 
-/cloudmart/<environment>/notifications/order-email
-/cloudmart/<environment>/notifications/low-stock-email
+The application Lambdas retrieve required configuration from SSM at runtime.
 
-The Monitoring stack creates:
-
-/cloudmart/<environment>/monitoring/email
-
-The API stack consumes the existing notification parameters.
-
-The Report Generator Lambda and other application components consume the database configuration parameters from SSM as required.
-
-17. Infrastructure as Code
+20. Infrastructure as Code
 
 CloudMart infrastructure is managed using AWS CloudFormation.
 
-Stack Deployment Order
+The main CloudFormation stacks are:
 
 Network
-   ↓
 SSM
-   ↓
 Data
-   ↓
 Security
-   ↓
 Artifacts
-   ↓
 Schema
-   ↓
 Auth
-   ↓
 API
-   ↓
 Reporting
-   ↓
 Monitoring
-   ↓
+
+Deployment Order
+
+Network
+   |
+   v
+SSM
+   |
+   v
+Data
+   |
+   v
+Security
+   |
+   v
+Artifacts
+   |
+   v
+Schema
+   |
+   v
+Auth
+   |
+   v
+API
+   |
+   v
+Reporting
+   |
+   v
+Monitoring
+   |
+   v
 Final Verification
 
-The stack dependencies are deployed in this order so that required networking, parameters, database resources, IAM permissions, Lambda artifacts, authentication, APIs, reporting, and monitoring are available when dependent resources are created.
+The stack order ensures that dependent resources are available before the components that consume them are deployed.
 
-The only manual infrastructure setup required for CI/CD is the one-time bootstrap of the GitHub OIDC provider and GitHub Actions deployment role.
+21. CloudFormation Stack Responsibilities
 
-18. Environment Configuration
+Network Stack
 
-CloudMart is designed to support environment-based deployment.
+Responsible for the networking foundation:
 
-The current environment is:
+VPC
+
+Public subnet
+
+Private subnet
+
+RDS support subnet
+
+Route tables
+
+Security groups
+
+VPC endpoints
+
+SSM Stack
+
+Responsible for environment-specific configuration parameters that are required during deployment.
+
+Data Stack
+
+Responsible for:
+
+RDS MySQL
+
+S3 resources
+
+Database-related parameters
+
+Notification parameters
+
+Security Stack
+
+Responsible for IAM roles and permissions required by the application resources.
+
+Artifacts Stack
+
+Provides the S3 location used for Lambda deployment artifacts.
+
+Schema Stack
+
+Deploys and executes the database schema runner.
+
+Auth Stack
+
+Creates the Authorizer Lambda and its required IAM permissions.
+
+API Stack
+
+Creates the main application API resources, including:
+
+API Gateway
+
+Product/Inventory Lambda
+
+Order Lambda
+
+Inventory Alert Lambda
+
+EventBridge event bus
+
+EventBridge rules
+
+SNS notification resources
+
+Reporting Stack
+
+Creates the reporting resources, including:
+
+Report Generator Lambda
+
+EventBridge scheduled rule
+
+S3 report integration
+
+EC2 dashboard resources
+
+Monitoring Stack
+
+Creates:
+
+CloudWatch dashboard
+
+CloudWatch alarms
+
+Monitoring SNS topic
+
+Monitoring email subscription
+
+Monitoring-related configuration
+
+22. Security
+
+CloudMart uses multiple security controls.
+
+IAM
+
+IAM roles provide permissions to:
+
+Lambda functions
+
+EC2 dashboard
+
+GitHub Actions
+
+Other AWS resources
+
+Permissions are scoped according to component responsibilities.
+
+Security Groups
+
+Security groups restrict network communication between application components.
+
+RDS is not directly exposed to the public internet.
+
+Parameter Store
+
+Configuration values are stored in SSM Parameter Store.
+
+The database password is stored as a SecureString.
+
+GitHub OIDC
+
+GitHub Actions authenticates to AWS through OIDC rather than long-lived AWS access keys.
+
+Authentication Token Security
+
+The application stores token hashes rather than plain-text authentication tokens.
+
+The Authorizer Lambda hashes the supplied token before checking the corresponding token_hash in RDS.
+
+Dashboard Session Security
+
+The Flask dashboard session secret is generated/configured on the EC2 instance and stored separately from the application source code.
+
+23. S3 Storage
+
+S3 is used for several CloudMart resources.
+
+Lambda Artifacts
+
+Lambda deployment packages are stored in an S3 artifacts bucket.
+
+The packages include functions such as:
+
+Product Lambda
+Order Lambda
+Inventory Alert Lambda
+Authorizer Lambda
+Report Generator Lambda
+Schema Runner Lambda
+
+Reports
+
+Generated reports are stored under:
+
+reports/
+
+Dashboard Files
+
+Dashboard files are stored in the dashboard S3 location and are used during EC2 dashboard setup.
+
+Important files include:
+
+app.py
+index.html
+
+24. Environment Configuration
+
+The current deployment uses:
 
 Environment: dev
 AWS Region: ap-south-1
 
-Examples of environment-specific stacks include:
+Environment-specific naming is used for CloudFormation stacks and SSM parameters.
+
+Examples:
 
 cloudmart-dev-network
 cloudmart-dev-data
@@ -807,92 +1315,33 @@ cloudmart-dev-api
 cloudmart-dev-reporting
 cloudmart-dev-monitoring
 
-This approach helps keep resources separated between environments.
+This approach keeps resources and configuration separated by environment.
 
-19. Security
+25. Deployment Verification
 
-Security is implemented using multiple AWS mechanisms.
-
-IAM
-
-IAM roles are used to provide AWS permissions to Lambda functions, EC2, GitHub Actions, and other components.
-
-Permissions are scoped according to the resources required by each component.
-
-Security Groups
-
-Security Groups control network access between EC2, Lambda, and RDS components.
-
-The RDS database is not directly exposed to the public internet.
-
-Systems Manager Parameter Store
-
-Database configuration values are stored in SSM Parameter Store.
-
-The database password is stored as a SecureString.
-
-Notification configuration values are also stored as environment-specific SSM parameters.
-
-GitHub OIDC
-
-GitHub Actions uses OIDC to assume the AWS deployment role without requiring long-lived AWS access keys.
-
-Session Security
-
-The Flask dashboard session secret is generated on the EC2 instance during deployment and stored in a protected local file rather than being hard-coded in the application source code.
-
-20. S3 Storage
-
-S3 is used for several purposes in CloudMart.
-
-Lambda Artifacts
-
-Lambda deployment packages are stored in an S3 artifact bucket.
-
-Examples include packages for:
-
-Product Lambda
-
-Order Lambda
-
-Inventory Alert Lambda
-
-Authorizer Lambda
-
-Report Generator Lambda
-
-Schema Runner Lambda
-
-Reports
-
-Generated daily reports are stored in the Reports S3 bucket.
-
-Dashboard Files
-
-Dashboard application files such as:
-
-app.py
-index.html
-
-are stored in the dashboard S3 prefix and downloaded to the EC2 instance during dashboard setup.
-
-21. Deployment and Verification
-
-After deployment, the following areas should be verified.
+After deployment, the following components should be verified.
 
 CloudFormation
 
-Verify that all CloudMart stacks reach:
+Verify that stacks reach:
 
 CREATE_COMPLETE
 
-or
+or:
 
 UPDATE_COMPLETE
 
 RDS
 
-Verify that the database is available and that the required tables exist:
+Verify:
+
+RDS is available.
+
+Database connectivity works.
+
+Required tables exist.
+
+Required tables:
 
 users
 products
@@ -902,39 +1351,89 @@ order_items
 
 Lambda
 
-Verify that the expected Lambda functions are deployed.
+Verify the expected Lambda functions are deployed.
 
 API Gateway
 
-Verify the product and order API resources and their configured authorization.
+Verify:
+
+API exists.
+
+Product resources exist.
+
+Order resources exist.
+
+Authorizer is configured.
+
+Methods are deployed.
 
 EventBridge
 
-Verify the event bus, rules, and targets.
+Verify:
+
+CloudMart event bus exists.
+
+Order event rules exist.
+
+Inventory alert rule exists.
+
+Scheduled reporting rule exists.
 
 SNS
 
-Verify notification topics and subscriptions.
+Verify:
+
+Application notification topics exist.
+
+Monitoring topic exists.
+
+Required email subscriptions are configured.
 
 S3
 
-Verify Lambda artifacts, dashboard files, and generated reports.
+Verify:
+
+Lambda artifacts exist.
+
+Dashboard files exist.
+
+Reports are generated under the reports prefix.
 
 EC2 Dashboard
 
-Verify that the dashboard is accessible and that the Flask application, Gunicorn service, and Nginx reverse proxy are running.
+Verify:
+
+EC2 is running.
+
+Flask files are present.
+
+Gunicorn is running.
+
+Nginx is running.
+
+Dashboard login works.
+
+Dashboard data loads correctly.
+
+Reports are accessible.
 
 CloudWatch
 
-Verify the dashboard, metrics, and alarms.
+Verify:
 
-A detailed step-by-step deployment procedure is maintained separately in the CloudMart Deployment Runbook.
+Dashboard exists.
 
-22. Functional Verification
+Standard AWS metrics are visible.
 
-The following application operations should be verified after deployment.
+Custom CloudMart metrics are being published.
 
-Products
+Required alarms exist.
+
+Alarm actions point to SNS.
+
+26. Functional Verification
+
+Product APIs
 
 GET     /products
 GET     /products/{id}
@@ -942,15 +1441,42 @@ POST    /products
 PUT     /products/{id}
 DELETE  /products/{id}
 
-Orders
+Verify:
+
+Product retrieval works.
+
+Authorized product creation works.
+
+Authorized product update works.
+
+Authorized product deletion works.
+
+Unauthorized requests are rejected.
+
+Order APIs
 
 POST    /orders
 GET     /orders
+GET     /orders/{id}
 PATCH   /orders/{id}
 
-Order creation should update inventory and publish the appropriate event.
+Verify:
 
-Order cancellation should restore the relevant inventory and publish the cancellation event.
+Order creation works.
+
+Inventory is updated.
+
+Successful orders produce the confirmation event.
+
+Failed orders are persisted correctly.
+
+Failed-order processing reaches the Order Failed Handler.
+
+Order cancellation updates the order status.
+
+Relevant inventory is restored after cancellation.
+
+Order cancellation produces the cancellation event.
 
 Notifications
 
@@ -966,111 +1492,435 @@ Low-stock notification
 
 CloudWatch alarm notification
 
-23. Technology Stack
+Reporting
 
-Backend
+Verify:
+
+EventBridge scheduled rule is enabled.
+
+Report Generator Lambda runs.
+
+CSV report is created.
+
+Report is stored in S3.
+
+Report appears in the EC2 dashboard.
+
+27. Repository Structure
+
+CloudMart-Capstone/
+|
++-- .github/
+|   +-- workflows/
+|       +-- deploy.yaml
+|
++-- cloudformation/
+|   +-- Network-stack.yaml
+|   +-- Data-stack.yaml
+|   +-- Security-stack.yaml
+|   +-- schema-stack.yaml
+|   +-- Auth-stack.yaml
+|   +-- api-stack.yaml
+|   +-- Reporting-stack.yaml
+|   +-- monitoring-stack.yaml
+|
++-- lambda/
+|   +-- product/
+|   |   +-- lambda_function.py
+|   |
+|   +-- order/
+|   |   +-- lambda_function.py
+|   |
+|   +-- inventory-alert/
+|   |   +-- lambda_function.py
+|   |
+|   +-- authorizer/
+|   |   +-- lambda_function.py
+|   |
+|   +-- report/
+|   |   +-- lambda_function.py
+|   |
+|   +-- schema-runner/
+|       +-- lambda_function.py
+|
++-- dashboard/
+|   +-- app.py
+|   +-- index.html
+|   +-- requirements.txt
+|
++-- docs/
+|
++-- README.md
+
+28. Technology Stack
+
+Application
 
 Python
+
 Flask
+
 Gunicorn
+
 MySQL
 
-Cloud
+PyMySQL
+
+Boto3
+
+AWS
+
+Amazon VPC
+
+Amazon API Gateway
 
 AWS Lambda
-Amazon API Gateway
-Amazon RDS
+
+Amazon RDS for MySQL
+
 Amazon EC2
+
 Amazon S3
+
 Amazon EventBridge
+
 Amazon SNS
+
 Amazon CloudWatch
+
 AWS Systems Manager Parameter Store
+
 AWS IAM
-Amazon VPC
+
 AWS CloudFormation
 
 CI/CD
 
 GitHub
+
 GitHub Actions
+
 GitHub OIDC
 
-24. Key Design Decisions
+Web Server
+
+Nginx
+
+Gunicorn
+
+Flask
+
+29. Key Design Decisions
 
 Why CloudFormation?
 
-CloudFormation provides Infrastructure as Code so that infrastructure can be consistently created, updated, and managed.
+CloudFormation provides Infrastructure as Code.
+
+It allows CloudMart infrastructure to be deployed consistently and divided into logical stacks.
 
 Why GitHub OIDC?
 
-OIDC avoids the need to store long-lived AWS access keys in GitHub.
+GitHub OIDC allows GitHub Actions to authenticate with AWS without storing long-lived AWS access keys.
+
+This improves deployment credential security.
 
 Why RDS MySQL?
 
-A relational database fits the structured relationships between users, products, inventory, orders, and order items.
+CloudMart has structured relationships between:
+
+Users
+
+Products
+
+Inventory
+
+Orders
+
+Order Items
+
+A relational database is suitable for these relationships and supports transactional application operations.
 
 Why EventBridge?
 
-EventBridge provides event-driven integration between application components and supports scheduled execution for reporting.
+EventBridge provides the central event bus shown in the architecture.
+
+It separates event production from downstream processing and also provides the scheduled trigger used by the reporting workflow.
 
 Why SNS?
 
-SNS provides a simple mechanism for delivering application and operational notifications through email.
+SNS provides notification delivery for application events and operational CloudWatch alarms.
 
 Why CloudWatch?
 
-CloudWatch provides centralized monitoring, metrics, dashboards, and alarms for AWS resources and CloudMart application behavior.
+CloudWatch provides:
+
+AWS service metrics
+
+Application metrics
+
+Dashboards
+
+Alarms
+
+Monitoring visibility
 
 Why EC2 for the Dashboard?
 
-The Flask dashboard is hosted on EC2 and uses Nginx and Gunicorn to provide a web-accessible administration interface.
+The administration dashboard is a Flask web application hosted on EC2.
 
-25. Project Summary
+Nginx acts as the reverse proxy and Gunicorn runs the Flask application.
 
-CloudMart is an AWS-based e-commerce backend platform that combines:
+This provides a dedicated interface for administrators and the operations team.
 
-Serverless application components
+Why VPC Endpoints?
 
-Relational data storage
+Private application components need connectivity to AWS services such as S3, SSM, CloudWatch Logs, monitoring APIs, and EventBridge.
 
-Event-driven processing
+VPC endpoints provide private access to these services without requiring a NAT Gateway for the project design.
 
-Automated notifications
+Why PATCH for Order Cancellation?
+
+Order cancellation changes the state of an existing order instead of deleting the order.
+
+This preserves the order history and allows cancelled orders to remain available for reporting and auditing.
+
+30. Complete End-to-End Architecture Flow
+
+The complete CloudMart flow is:
+
+                         DEVELOPER
+                             |
+                             v
+                           GITHUB
+                             |
+                             v
+                       GITHUB ACTIONS
+                             |
+                             v
+                       CLOUDFORMATION
+                             |
+                             v
+                     AWS INFRASTRUCTURE
+                             |
+                             v
+                           CLIENT
+                             |
+                             v
+                       API GATEWAY
+                             |
+                             v
+                     AUTHORIZER LAMBDA
+                             |
+                     Validate User
+                             |
+                 +-----------+-----------+
+                 |                       |
+                 v                       v
+            Valid User             Invalid User
+                 |                       |
+                 v                       v
+           Allow Request              HTTP 401
+                 |
+          +------+------+
+          |             |
+          v             v
+ Product/Inventory   Order Lambda
+     Lambda               |
+          |               |
+          +-------+-------+
+                  |
+                  v
+              RDS MySQL
+                  |
+                  v
+       Order Confirmed / Failed /
+             Cancelled
+                  |
+                  v
+       EventBridge CloudMart
+             Event Bus
+                  |
+       +----------+-----------+
+       |          |           |
+       v          v           v
+  Scheduled    Order Failed  Inventory
+     Rule       Handler       Alert
+       |            |           |
+       v            v           v
+ Report          RDS          SNS
+ Generator     Failed           |
+ Lambda         Order           v
+       |        Data           Email
+       v
+ S3 Reports
+       |
+       v
+EC2 Flask Dashboard
+       |
+       v
+Operations Team
+
+
+CloudWatch
+    |
+    v
+CloudWatch Alarms
+    |
+    v
+SNS
+    |
+    v
+Operations Team
+
+31. Project Summary
+
+CloudMart demonstrates a complete AWS-based e-commerce backend architecture combining:
+
+API Gateway
+
+Custom Lambda authentication
+
+Product and inventory processing
+
+Order processing
+
+Amazon RDS MySQL
+
+EventBridge event-driven architecture
+
+Failed-order persistence
+
+SNS notifications
 
 Scheduled reporting
 
-EC2-based administration
+S3 report storage
 
-Centralized monitoring
+EC2 Flask administration dashboard
 
-Infrastructure as Code
+CloudWatch monitoring
 
-Automated CI/CD
+CloudWatch alarms
 
-The project demonstrates how multiple AWS services can be integrated into a complete cloud application while maintaining controlled networking, authentication, monitoring, and deployment automation.
+VPC-based networking
 
-26. Documentation
+IAM security
 
-Additional project documentation includes:
+SSM Parameter Store
 
-Architecture Diagram
+AWS CloudFormation
 
-Data Model Documentation
+GitHub Actions
 
-Deployment Runbook
+GitHub OIDC
+
+The architecture separates application processing, asynchronous event handling, reporting, administration, and monitoring while keeping sensitive application and database resources inside private networking.
+
+32. Environment
+
+Project:          CloudMart
+Environment:      dev
+AWS Region:       ap-south-1
+Database:         Amazon RDS for MySQL
+Deployment:       GitHub Actions
+Infrastructure:   AWS CloudFormation
+Dashboard:        EC2 + Flask + Gunicorn + Nginx
+
+33. Documentation
+
+Additional project documentation can include:
+
+Architecture documentation
+
+Database/data model documentation
+
+Deployment runbook
 
 CloudFormation stack documentation
 
-API and application documentation
+API documentation
 
-These documents provide detailed information beyond the overview provided in this README.
+Application documentation
 
-27. Environment
+These documents provide detailed implementation information beyond this README.
 
-Project:        CloudMart
-Environment:    dev
-AWS Region:     ap-south-1
-Database:       Amazon RDS for MySQL
-Deployment:     GitHub Actions
-Infrastructure: AWS CloudFormation
+Final Architecture at a Glance
+
+CI/CD
+Developer
+   |
+GitHub
+   |
+GitHub Actions
+   |
+CloudFormation
+   |
+AWS Infrastructure
+
+
+APPLICATION
+Client
+   |
+API Gateway
+   |
+Authorizer Lambda
+   |
+   +---- Valid ----> Product/Inventory Lambda
+   |                       |
+   |                       |
+   |                  RDS MySQL
+   |
+   +---- Valid ----> Order Lambda
+                           |
+                           v
+                       RDS MySQL
+                           |
+                           v
+                  EventBridge Event Bus
+                     /      |       \
+                    /       |        \
+                   v        v         v
+             Failed      Inventory  Scheduled
+             Handler       Alert       Rule
+                |           |           |
+                v           v           v
+               RDS         SNS       Report
+                                      Lambda
+                                         |
+                                         v
+                                      S3 Reports
+                                         |
+                                         v
+                                    EC2 Dashboard
+
+
+MONITORING
+AWS/Application Metrics
+          |
+          v
+      CloudWatch
+          |
+          v
+        Alarms
+          |
+          v
+         SNS
+          |
+          v
+    Operations Team
+
+
+NETWORK
+VPC
+ |
+ +-- Public
+ |     |
+ |     +-- EC2 Dashboard
+ |
+ +-- Private
+       |
+       +-- RDS MySQL
+       +-- Order Lambda
+       +-- Inventory Alert Lambda
+       +-- Product/Inventory Lambda
+       +-- Authorizer Lambda
