@@ -26,7 +26,7 @@ Parameters:
   DashboardS3Prefix:
     Type: String
     Default: cloudmart-dashboard
-    Description: S3 prefix containing app.py, index.html and login.html
+    Description: S3 prefix containing app.py, index.html
 
 
 
@@ -71,9 +71,9 @@ Resources:
 
       ManagedPolicyArns:
 
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole #This gives Lambda basic CloudWatch Logs permissions.
         - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
-
+#It also needs VPC access because your Lambda interacts with private resources,to manage the network interfaces required for that VPC attachment.
       Policies:
 
         - PolicyName:
