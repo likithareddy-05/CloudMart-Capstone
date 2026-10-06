@@ -279,7 +279,7 @@ def lambda_handler(event, context):
         method_arn = event.get(
             "methodArn"
         )
-
+#methodArn identifies what is being requested; the policy returned by the Authorizer determines whether that request is permitted.
         if not method_arn:
 
             print(json.dumps({
