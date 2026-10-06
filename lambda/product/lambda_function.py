@@ -500,28 +500,50 @@ def lambda_handler(
                 and not product_id
             ):
 
-                # GET product listing is public.
-                # Only active products are returned.
-                cursor.execute(
-                    """
-                    SELECT
-                        p.product_id,
-                        p.name,
-                        p.description,
-                        p.price,
-                        p.category,
-                        i.stock_count,
-                        i.low_stock_threshold,
-                        p.created_at,
-                        p.updated_at
-                    FROM products p
-                    LEFT JOIN inventory i
-                        ON p.product_id =
-                           i.product_id
-                    WHERE p.is_deleted = FALSE
-                    ORDER BY p.product_id
-                    """
-                )
+                if user_role == "ADMIN":
+
+                    cursor.execute(
+                        """
+                        SELECT
+                            p.product_id,
+                            p.name,
+                            p.description,
+                            p.price,
+                            p.category,
+                            i.stock_count,
+                            i.low_stock_threshold,
+                            p.is_deleted,
+                            p.created_at,
+                            p.updated_at
+                        FROM products p
+                        LEFT JOIN inventory i
+                            ON p.product_id = i.product_id
+                        ORDER BY p.product_id
+                        """
+                    )
+
+                else:
+
+                    cursor.execute(
+                        """
+                        SELECT
+                            p.product_id,
+                            p.name,
+                            p.description,
+                            p.price,
+                            p.category,
+                            i.stock_count,
+                            i.low_stock_threshold,
+                            p.is_deleted,
+                            p.created_at,
+                            p.updated_at
+                        FROM products p
+                        LEFT JOIN inventory i
+                            ON p.product_id = i.product_id
+                        WHERE p.is_deleted = FALSE
+                        ORDER BY p.product_id
+                        """
+                    )
 
                 products = cursor.fetchall()
 
@@ -555,27 +577,54 @@ def lambda_handler(
                     product_id=product_id
                 )
 
-                cursor.execute(
-                    """
-                    SELECT
-                        p.product_id,
-                        p.name,
-                        p.description,
-                        p.price,
-                        p.category,
-                        i.stock_count,
-                        i.low_stock_threshold,
-                        p.created_at,
-                        p.updated_at
-                    FROM products p
-                    LEFT JOIN inventory i
-                        ON p.product_id =
-                           i.product_id
-                    WHERE p.product_id = %s
-                      AND p.is_deleted = FALSE
-                    """,
-                    (product_id,)
-                )
+                if user_role == "ADMIN":
+
+                    # ADMIN can see active and deleted products
+                    cursor.execute(
+                        """
+                        SELECT
+                            p.product_id,
+                            p.name,
+                            p.description,
+                            p.price,
+                            p.category,
+                            i.stock_count,
+                            i.low_stock_threshold,
+                            p.is_deleted,
+                            p.created_at,
+                            p.updated_at
+                        FROM products p
+                        LEFT JOIN inventory i
+                            ON p.product_id = i.product_id
+                        WHERE p.product_id = %s
+                        """,
+                        (product_id,)
+                    )
+
+                else:
+
+                    # USER can see only active products
+                    cursor.execute(
+                        """
+                        SELECT
+                            p.product_id,
+                            p.name,
+                            p.description,
+                            p.price,
+                            p.category,
+                            i.stock_count,
+                            i.low_stock_threshold,
+                            p.is_deleted,
+                            p.created_at,
+                            p.updated_at
+                        FROM products p
+                        LEFT JOIN inventory i
+                            ON p.product_id = i.product_id
+                        WHERE p.product_id = %s
+                        AND p.is_deleted = FALSE
+                        """,
+                        (product_id,)
+                    )
 
                 product = cursor.fetchone()
 
