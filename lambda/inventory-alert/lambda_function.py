@@ -228,7 +228,7 @@ def lambda_handler(event, context):
             log_event(
                 "inventory_alert_metric_publish_started",
                 product_id=product_id,
-                metric_name="InventoryAlerts",
+                metric_name="LowStockEvents",
                 namespace="CloudMart"
             )
 
@@ -242,7 +242,7 @@ def lambda_handler(event, context):
 
                         {
                             "MetricName":
-                                "InventoryAlerts",
+                                "LowStockEvents",
 
                             "Value":
                                 1,
@@ -274,7 +274,7 @@ def lambda_handler(event, context):
                     metric_error,
                     product_id=product_id,
                     product_name=product_name,
-                    metric_name="InventoryAlerts",
+                    metric_name="LowStockEvents",
                     namespace="CloudMart",
                     status="failed"
                 )
