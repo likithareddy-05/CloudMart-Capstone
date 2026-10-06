@@ -7,7 +7,7 @@ from functools import wraps
 import boto3
 import pymysql
 from flask import (
-    Flask,
+    Flask, 
     render_template,
     request, 
     redirect,
@@ -16,7 +16,13 @@ from flask import (
     send_file,
     flash
 )
-
+#Flask → creates the application
+#request → reads incoming request data
+#render_template → sends data to HTML
+#redirect → redirects browser
+#url_for → generates Flask URLs
+#session → stores login/session information
+#send_file → sends downloaded report to browser
 
 # ============================================================
 # LOGGING
